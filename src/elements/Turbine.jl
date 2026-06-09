@@ -10,8 +10,10 @@ Modes:
   :pressure_closure — PR is auto-computed so the turbine exhausts to P_exit
                       (the compressor inlet pressure for a closed cycle).
                       Provide `P_exit` at construction.
-  :off_design       — PR and η from the performance map; shaft speed is the
-                      independent variable.
+  :off_design       — PR and η from the performance map queried at (Nc, Wc_map),
+                      where Wc_map — the map flow coordinate — is an independent
+                      variable owned by the solver.  Residual: Wc_map - actual_Wc
+                      = 0.  Shaft speed itself belongs to the Shaft element.
 
 The type parameter T allows design variables PR, η_poly, and P_exit to carry
 ForwardDiff Dual numbers for gradient-based design optimization.
@@ -50,11 +52,12 @@ function compute!(el::Turbine, inlet::Port)::Port
         s.Pt / el.P_exit   # local only; el.PR left unchanged
     elseif el.mode == :off_design && !isnothing(el.map)
         Nc = corrected_speed(el.N_shaft, s.Tt)
-        Wc_act = corrected_flow(s.W, s.Tt, s.Pt)
-        PR_map, η_map = query(el.map, Nc, Wc_act)
+        # Seed the map coordinate from the actual flow on the very first pass,
+        # before the solver has taken ownership of it.
+        el.Wc_map > 0.0 || (el.Wc_map = corrected_flow(s.W, s.Tt, s.Pt))
+        PR_map, η_map = query(el.map, Nc, el.Wc_map)
         el.PR    = PR_map
         el.η_poly = η_map
-        el.Wc_map = Wc_act
         el.PR
     else
         el.PR
@@ -75,16 +78,16 @@ function residuals(el::Turbine)
     el.mode == :off_design || return Float64[]
     s = el.inlet[]
     Wc_act = corrected_flow(s.W, s.Tt, s.Pt)
-    [el.Wc_map - Wc_act]
+    [(el.Wc_map - Wc_act) / el.Wc_map]
 end
 
 function indep_vars(el::Turbine)
-    el.mode == :off_design && return [el.N_shaft]
+    el.mode == :off_design && return [el.Wc_map]
     Float64[]
 end
 
 function set_indep_vars!(el::Turbine, x::AbstractVector)
-    el.mode == :off_design && (el.N_shaft = x[1])
+    el.mode == :off_design && (el.Wc_map = x[1])
 end
 
 specific_work(el::Turbine) =

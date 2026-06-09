@@ -10,8 +10,11 @@ divided by polytropic efficiency.  Supports two operating modes:
               so the map passes through this design point.
 
   :off_design — PR and efficiency come from the performance map interpolated
-               at (Nc, Wc) from the current shaft speed and inlet conditions.
-               Residual: map_Wc - actual_Wc = 0  (one equation).
+               at (Nc, Wc_map), where Nc follows from the shaft speed and
+               Wc_map — the map flow coordinate — is an independent variable
+               owned by the solver.  Residual: Wc_map - actual_Wc = 0
+               (flow continuity onto the map; one equation, one unknown).
+               Shaft speed itself belongs to the Shaft element.
 
 The type parameter T allows design variables PR and η_poly to carry
 ForwardDiff Dual numbers for gradient-based design optimization.
@@ -27,7 +30,7 @@ mutable struct Compressor{T<:Real} <: AbstractElement
     # State (written by compute!, read by residuals)
     inlet::Union{Port, Nothing}
     outlet::Union{Port, Nothing}
-    Wc_map::Float64  # corrected flow from map (off-design only)
+    Wc_map::Float64  # map flow coordinate — solver independent (off-design only)
 end
 
 function Compressor(name::String;
@@ -45,11 +48,12 @@ function compute!(el::Compressor, inlet::Port)::Port
 
     if el.mode == :off_design && !isnothing(el.map)
         Nc = corrected_speed(el.N_shaft, s.Tt)
-        Wc_act = corrected_flow(s.W, s.Tt, s.Pt)
-        PR_map, η_map = query(el.map, Nc, Wc_act)
+        # Seed the map coordinate from the actual flow on the very first pass,
+        # before the solver has taken ownership of it.
+        el.Wc_map > 0.0 || (el.Wc_map = corrected_flow(s.W, s.Tt, s.Pt))
+        PR_map, η_map = query(el.map, Nc, el.Wc_map)
         el.PR     = PR_map
         el.η_poly = η_map
-        el.Wc_map = Wc_act
     end
 
     fp     = s.fluid
@@ -64,15 +68,15 @@ end
 n_residuals(el::Compressor) = el.mode == :off_design ? 1 : 0
 
 function residuals(el::Compressor)
-    el.mode == :design && return Float64[]
+    el.mode == :off_design || return Float64[]
     s = el.inlet[]
     Wc_act = corrected_flow(s.W, s.Tt, s.Pt)
-    [el.Wc_map - Wc_act]
+    [(el.Wc_map - Wc_act) / el.Wc_map]
 end
 
-indep_vars(el::Compressor) = el.mode == :off_design ? [el.N_shaft] : Float64[]
+indep_vars(el::Compressor) = el.mode == :off_design ? [el.Wc_map] : Float64[]
 function set_indep_vars!(el::Compressor, x::AbstractVector)
-    el.mode == :off_design && (el.N_shaft = x[1])
+    el.mode == :off_design && (el.Wc_map = x[1])
 end
 
 """Work input per unit mass flow [J/kg]"""
