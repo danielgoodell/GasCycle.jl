@@ -55,8 +55,9 @@ set_state!(net, comp; Pt=P_in, Tt=T_in, W=W_flow, fluid=fluid)
 sol = solve!(net; verbose=true)
 
 println("\n=== Recuperated Brayton Cycle Results ===")
+PR_turb_actual = reactor.outlet[].Pt / turb.outlet[].Pt
 println("Compressor PR:            $(round(comp.PR,           digits=3))")
-println("Turbine PR:               $(round(turb.PR,           digits=3))")
+println("Turbine PR:               $(round(PR_turb_actual,    digits=3))")
 println("Comp outlet Tt:           $(round(comp.outlet[].Tt,  digits=1)) K")
 println("Recup cold outlet Tt:     $(round(recup.cold_outlet[].Tt, digits=1)) K")
 println("Turbine inlet Tt:         $(round(reactor.outlet[].Tt,    digits=1)) K")
