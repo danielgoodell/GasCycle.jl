@@ -15,7 +15,7 @@ Off-design is scaffolded but **not yet functional** — that is the main gap.
 
 ## Ordered next steps
 
-### 1. Fix the off-design map residual formulation  ← IN PROGRESS
+### 1. Fix the off-design map residual formulation  ✅ DONE (87239c0)
 The High-severity finding from REVIEW.md, plus a related degeneracy:
 
 - `Compressor`/`Turbine` set `Wc_map = Wc_act` in `compute!`, then the
@@ -36,16 +36,13 @@ Fix (NPSS-style formulation):
   solve at design boundary conditions must recover the design N, PR, η)
   plus a perturbed-TIT case.
 
-### 2. Two quick wins
-- **`Pkg.test()` fails**: `test/runtests.jl` does `using Pkg; Pkg.activate(...)`,
-  which breaks the isolated test env. Remove it and declare test deps via
-  `[extras]`/`[targets]` in Project.toml.
-- **Stale turbine PR display**: `examples/bru_tit_sweep.jl:79` still prints
-  `turb.PR`, which is left unchanged in `:pressure_closure` mode. Add a
-  `pressure_ratio(::Turbine)` accessor and use it in both examples
-  (recuperated_brayton.jl already has a local workaround).
+### 2. Two quick wins  ✅ DONE (a1ede04)
+- `Pkg.test()` works: removed `Pkg.activate` from test files; Test and
+  ForwardDiff declared via `[extras]`/`[targets]`.
+- `pressure_ratio(::Turbine)`/`(::Compressor)` accessors added and used by
+  all four examples (fixes stale PR in simple_brayton and bru_tit_sweep).
 
-### 3. Off-design TIT sweep validation (plan Phase 7)
+### 3. Off-design TIT sweep validation (plan Phase 7)  ← NEXT
 Once item 1 is in, build the turbine-inlet-temperature sweep (100% → 60% of
 design) with scaled maps on the BRU cycle: confirm shaft power balance holds
 and the maps track. This is the test that proves off-design capability is real.
