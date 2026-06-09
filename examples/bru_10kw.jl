@@ -139,7 +139,7 @@ println()
 
 PR_c = comp.outlet[].Pt / comp.inlet[].Pt
 println("Compressor PR:           $(round(PR_c, digits=3))           1.9 [design]")
-println("Turbine PR:              $(round(turb.PR, digits=3))           ~1.75 [design]")
+println("Turbine PR:              $(round(PR_turb_actual, digits=3))           ~1.75 [design]")
 println("Turb inlet P:            $(topsia(heater.outlet[].Pt)) psia          43.2 psia [design]")
 println("Turb outlet P:           $(topsia(turb.outlet[].Pt)) psia          24.69 psia [NPSS]")
 println()

@@ -92,7 +92,7 @@ end
 
 """Collect all element outlet Tt values for convergence tracking."""
 function _outlet_Tt_vec(net::FlowNetwork)
-    vals = Float64[]
+    vals = Real[]
     for el in net.elements
         if el isa HeatExchanger
             isnothing(el.cold_outlet) || push!(vals, el.cold_outlet[].Tt)
@@ -182,11 +182,14 @@ struct SolveResult
     net::FlowNetwork
     status::Symbol
     iterations::Int
-    residual_norm::Float64
+    residual_norm::Real  # Real to accept both Float64 and ForwardDiff Duals
 end
 
-Base.show(io::IO, r::SolveResult) =
-    print(io, "SolveResult($(r.status), $(r.iterations) iters, |F|=$(round(r.residual_norm, sigdigits=3)))")
+Base.show(io::IO, r::SolveResult) = begin
+    rn = r.residual_norm
+    rn_str = rn isa AbstractFloat ? string(round(rn, sigdigits=3)) : string(rn)
+    print(io, "SolveResult($(r.status), $(r.iterations) iters, |F|=$rn_str)")
+end
 
 function Base.getindex(r::SolveResult, name::String)
     el = findfirst(e -> hasproperty(e, :name) && e.name == name, r.net.elements)

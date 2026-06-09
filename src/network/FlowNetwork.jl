@@ -58,7 +58,7 @@ end
 # ── Port helpers ──────────────────────────────────────────────────────────────
 
 """Return the Port currently stored on an outlet port, or nothing."""
-function _get_outlet(el::AbstractElement, port::Symbol)::Union{Port,Nothing}
+function _get_outlet(el::AbstractElement, port::Symbol)
     port == :outlet     && return hasproperty(el, :outlet)      ? el.outlet      :
                                   (el isa HeatExchanger         ? el.cold_outlet : nothing)
     port == :cold_outlet && el isa HeatExchanger && return el.cold_outlet
@@ -89,7 +89,7 @@ function _set_inlet!(el::AbstractElement, port::Symbol, p::Port)
 end
 
 """Return the stored value of an inlet port, or nothing."""
-function _get_stored_inlet(el::AbstractElement, port::Symbol)::Union{Port,Nothing}
+function _get_stored_inlet(el::AbstractElement, port::Symbol)
     port == :inlet      && return hasproperty(el, :inlet) ? el.inlet :
                                   (el isa HeatExchanger   ? el.cold_inlet : nothing)
     port == :cold_inlet && el isa HeatExchanger && return el.cold_inlet
@@ -109,7 +109,7 @@ end
 
 # ── Compute one element and store its outlets in avail ────────────────────────
 
-const _AvailMap = Dict{Tuple{Int,Symbol}, Port}
+const _AvailMap = Dict{Tuple{Int,Symbol}, Any}
 
 function _compute_element!(net::FlowNetwork, el_idx::Int, avail::_AvailMap)
     el = net.elements[el_idx]
@@ -215,7 +215,7 @@ end
 
 """Set the thermodynamic inlet state at the first element in the loop."""
 function set_state!(net::FlowNetwork, first_element::AbstractElement;
-                    Pt::Float64, Tt::Float64, W::Float64, fluid::FluidProperties)
+                    Pt, Tt, W, fluid::FluidProperties)
     net.seed_el    = _el_idx(net, first_element)
     net.seed_state = FluidState(Pt, Tt, W, fluid)
 end

@@ -12,15 +12,18 @@ Modes:
                       Provide `P_exit` at construction.
   :off_design       — PR and η from the performance map; shaft speed is the
                       independent variable.
+
+The type parameter T allows design variables PR, η_poly, and P_exit to carry
+ForwardDiff Dual numbers for gradient-based design optimization.
 """
-mutable struct Turbine <: AbstractElement
+mutable struct Turbine{T<:Real} <: AbstractElement
     name::String
-    PR::Float64          # expansion ratio (Pt_in / Pt_out)
-    η_poly::Float64      # polytropic efficiency
+    PR::T            # expansion ratio (Pt_in / Pt_out)
+    η_poly::T        # polytropic efficiency
     map::Union{PerformanceMap, Nothing}
     mode::Symbol
-    N_shaft::Float64     # [rpm] — set by Shaft
-    P_exit::Float64      # target exit pressure for :pressure_closure [Pa]
+    N_shaft::Float64 # [rpm] — set by Shaft
+    P_exit::T        # target exit pressure for :pressure_closure [Pa]
 
     inlet::Union{Port, Nothing}
     outlet::Union{Port, Nothing}
@@ -28,21 +31,23 @@ mutable struct Turbine <: AbstractElement
 end
 
 function Turbine(name::String;
-                 PR::Float64     = 2.0,
-                 η_poly::Float64 = 0.90,
+                 PR      = 2.0,
+                 η_poly   = 0.90,
                  map::Union{PerformanceMap,Nothing} = nothing,
-                 mode::Symbol    = :design,
-                 P_exit::Float64 = 101325.0)
-    Turbine(name, PR, η_poly, map, mode, 0.0, P_exit, nothing, nothing, 0.0)
+                 mode::Symbol = :design,
+                 P_exit   = 101325.0)
+    T = promote_type(typeof(PR), typeof(η_poly), typeof(P_exit))
+    Turbine{T}(name, T(PR), T(η_poly), map, mode, 0.0, T(P_exit), nothing, nothing, 0.0)
 end
 
 function compute!(el::Turbine, inlet::Port)::Port
     el.inlet = inlet
     s = inlet[]
 
-    if el.mode == :pressure_closure
-        # PR set so turbine exhausts exactly to the specified exit pressure
-        el.PR = s.Pt / el.P_exit
+    # PR_eff is computed locally so Dual numbers can flow through pressure_closure
+    # without trying to store a Dual value into el.PR (which may be Float64).
+    PR_eff = if el.mode == :pressure_closure
+        s.Pt / el.P_exit   # local only; el.PR left unchanged
     elseif el.mode == :off_design && !isnothing(el.map)
         Nc = corrected_speed(el.N_shaft, s.Tt)
         Wc_act = corrected_flow(s.W, s.Tt, s.Pt)
@@ -50,15 +55,18 @@ function compute!(el::Turbine, inlet::Port)::Port
         el.PR    = PR_map
         el.η_poly = η_map
         el.Wc_map = Wc_act
+        el.PR
+    else
+        el.PR
     end
 
     fp = s.fluid
     h_in = enthalpy(fp, s.Tt, s.Pt)
     s_in = entropy(fp, s.Tt, s.Pt)
 
-    Pt_out = s.Pt / el.PR
+    Pt_out = s.Pt / PR_eff
 
-    Tt_is  = T_from_s(fp, s_in, Pt_out; T_guess = s.Tt / el.PR^0.3)
+    Tt_is  = T_from_s(fp, s_in, Pt_out; T_guess = s.Tt / PR_eff^0.3)
     h_is   = enthalpy(fp, Tt_is, Pt_out)
     h_out  = h_in - (h_in - h_is) * el.η_poly
 
@@ -78,8 +86,6 @@ function residuals(el::Turbine)
     [el.Wc_map - Wc_act]
 end
 
-# Only :off_design has solver unknowns (shaft speed from map).
-# :design and :pressure_closure have fixed or auto-computed PR.
 function indep_vars(el::Turbine)
     el.mode == :off_design && return [el.N_shaft]
     Float64[]

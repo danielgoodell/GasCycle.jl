@@ -16,11 +16,11 @@ Usage in FlowNetwork:
   hx = HeatExchanger("Recup"; ε=0.95)
   add_hx_pair!(net, hx, hot_inlet_port, cold_inlet_port)
 """
-mutable struct HeatExchanger <: AbstractElement
+mutable struct HeatExchanger{T<:Real} <: AbstractElement
     name::String
-    ε::Float64        # effectiveness (0–1)
-    dPqP_hot::Float64
-    dPqP_cold::Float64
+    ε::T           # effectiveness (0–1)
+    dPqP_hot::T
+    dPqP_cold::T
 
     # Set by add_hx_pair! before first compute!
     hot_inlet::Union{Port, Nothing}
@@ -30,11 +30,12 @@ mutable struct HeatExchanger <: AbstractElement
 end
 
 function HeatExchanger(name::String;
-                       ε::Float64        = 0.90,
-                       dPqP_hot::Float64  = 0.01,
-                       dPqP_cold::Float64 = 0.01)
-    HeatExchanger(name, ε, dPqP_hot, dPqP_cold,
-                  nothing, nothing, nothing, nothing)
+                       ε         = 0.90,
+                       dPqP_hot  = 0.01,
+                       dPqP_cold = 0.01)
+    T = promote_type(typeof(ε), typeof(dPqP_hot), typeof(dPqP_cold))
+    HeatExchanger{T}(name, T(ε), T(dPqP_hot), T(dPqP_cold),
+                     nothing, nothing, nothing, nothing)
 end
 
 """
@@ -65,8 +66,8 @@ function compute_hx!(hx::HeatExchanger)
     Tt_h_out = sh.Tt - Q / Cdot_h
     Tt_c_out = sc.Tt + Q / Cdot_c
 
-    Pt_h_out = sh.Pt * (1.0 - hx.dPqP_hot)
-    Pt_c_out = sc.Pt * (1.0 - hx.dPqP_cold)
+    Pt_h_out = sh.Pt * (1 - hx.dPqP_hot)
+    Pt_c_out = sc.Pt * (1 - hx.dPqP_cold)
 
     hx.hot_outlet  = Port(update(sh; Pt = Pt_h_out, Tt = Tt_h_out))
     hx.cold_outlet = Port(update(sc; Pt = Pt_c_out, Tt = Tt_c_out))

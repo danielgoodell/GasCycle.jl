@@ -185,3 +185,42 @@ end
     pb = power_balance(sh)
     @test pb isa Float64
 end
+
+@testset "ForwardDiff: net power gradient" begin
+    using ForwardDiff
+
+    fluid = HeXeIdealGas(0.47)
+
+    function cycle_power(x::AbstractVector)
+        PR_comp, ε_recup = x[1], x[2]
+        T0, P0, W = 400.0, 500e3, 10.0
+
+        net    = FlowNetwork()
+        comp   = Compressor("C"; PR=PR_comp, η_poly=0.88)
+        recup  = HeatExchanger("R"; ε=ε_recup, dPqP_hot=0.01, dPqP_cold=0.01)
+        heater = HeatSource("H"; TtExit=1100.0, dPqP=0.02)
+        P_exit = P0 / ((1-0.01)*(1-0.01))
+        turb   = Turbine("T"; mode=:pressure_closure, P_exit=P_exit, η_poly=0.90)
+
+        add!(net, comp, recup, heater, turb)
+        connect!(net, comp => recup => heater => turb => comp)
+        add_hx_pair!(net, recup; hot=turb)
+        set_state!(net, comp; Pt=P0, Tt=T0, W=W, fluid=fluid)
+        sol = solve!(net; maxiter=200)
+        net_power(sol) / 1000
+    end
+
+    x0 = [2.5, 0.90]
+    ∇W = ForwardDiff.gradient(cycle_power, x0)
+
+    # Gradient must be non-NaN and finite
+    @test all(isfinite.(∇W))
+
+    # ∂W/∂PR_comp > 0: higher pressure ratio → more turbine work (physics check)
+    @test ∇W[1] > 0
+
+    # Verify against forward-difference (tolerance 0.01%)
+    h = 1e-4
+    fd1 = (cycle_power([x0[1]+h*x0[1], x0[2]]) - cycle_power([x0[1]-h*x0[1], x0[2]])) / (2h*x0[1])
+    @test ∇W[1] ≈ fd1  rtol=1e-4
+end

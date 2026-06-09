@@ -6,6 +6,7 @@ Equation of state: P = ρ R T.
 Entropy includes both temperature and pressure terms.
 
 Use this for unit tests and examples that run without an FPT file.
+All methods have closed-form expressions and fully support ForwardDiff AD.
 """
 struct IdealGasFluid <: FluidProperties
     R::Float64      # specific gas constant [J/(kg·K)]
@@ -32,16 +33,16 @@ function HeXeIdealGas(x_He::Float64)
     IdealGasFluid(M_molar=M_mix)
 end
 
-cp(fp::IdealGasFluid, T::Float64, P::Float64)       = fp.cp_val
-enthalpy(fp::IdealGasFluid, T::Float64, P::Float64) = fp.cp_val * T + fp.h_ref
-entropy(fp::IdealGasFluid, T::Float64, P::Float64)  =
+cp(fp::IdealGasFluid, T, P)       = fp.cp_val
+enthalpy(fp::IdealGasFluid, T, P) = fp.cp_val * T + fp.h_ref
+entropy(fp::IdealGasFluid, T, P)  =
     fp.cp_val * log(T / 298.15) - fp.R * log(P / 101325.0)
-density(fp::IdealGasFluid, T::Float64, P::Float64)  = P / (fp.R * T)
-gamma(fp::IdealGasFluid, T::Float64, P::Float64)    = fp.cp_val / (fp.cp_val - fp.R)
+density(fp::IdealGasFluid, T, P)  = P / (fp.R * T)
+gamma(fp::IdealGasFluid, T, P)    = fp.cp_val / (fp.cp_val - fp.R)
 
-# Fast Newton inversion (exact for constant Cp)
-T_from_h(fp::IdealGasFluid, h_target::Float64, P::Float64; T_guess::Float64=500.0) =
+# Exact closed-form inversions — fully AD-compatible
+T_from_h(fp::IdealGasFluid, h_target, P; T_guess=500.0) =
     (h_target - fp.h_ref) / fp.cp_val
 
-T_from_s(fp::IdealGasFluid, s_target::Float64, P::Float64; T_guess::Float64=500.0) =
+T_from_s(fp::IdealGasFluid, s_target, P; T_guess=500.0) =
     298.15 * exp((s_target + fp.R * log(P / 101325.0)) / fp.cp_val)

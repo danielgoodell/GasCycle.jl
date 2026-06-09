@@ -261,54 +261,66 @@ _clamp_PT(fp::FPTFluid, T, P) =
     (clamp(P, fp.Pt_min, fp.Pt_max),
      clamp(T, fp.Tt_min, fp.Tt_max))
 
-function cp(fp::FPTFluid, T::Float64, P::Float64)::Float64
+function cp(fp::FPTFluid, T, P)
     Pc, Tc = _clamp_PT(fp, T, P)
     isnothing(fp.itp_cp) && return enthalpy(fp, T+0.5, P) - enthalpy(fp, T-0.5, P)
     fp.itp_cp(Pc, Tc)
 end
 
-function enthalpy(fp::FPTFluid, T::Float64, P::Float64)::Float64
+function enthalpy(fp::FPTFluid, T, P)
     Pc, Tc = _clamp_PT(fp, T, P)
     fp.itp_h(Pc, Tc)
 end
 
-function entropy(fp::FPTFluid, T::Float64, P::Float64)::Float64
+function entropy(fp::FPTFluid, T, P)
     Pc, Tc = _clamp_PT(fp, T, P)
     fp.itp_s(Pc, Tc)
 end
 
-function density(fp::FPTFluid, T::Float64, P::Float64)::Float64
+function density(fp::FPTFluid, T, P)
     isnothing(fp.itp_rho) && return P / (cp(fp,T,P) * (1.0 - 1.0/gamma(fp,T,P)) * T)
     Pc, Tc = _clamp_PT(fp, T, P)
     fp.itp_rho(Pc, Tc)
 end
 
-function gamma(fp::FPTFluid, T::Float64, P::Float64)::Float64
+function gamma(fp::FPTFluid, T, P)
     isnothing(fp.itp_gam) && return 5.0/3.0
     Pc, Tc = _clamp_PT(fp, T, P)
     fp.itp_gam(Pc, Tc)
 end
 
-function T_from_h(fp::FPTFluid, h_target::Float64, P::Float64;
-                  T_guess::Float64=500.0)::Float64
+function T_from_h(fp::FPTFluid, h_target, P; T_guess=500.0)
     if !isnothing(fp.itp_Th)
         Pc = clamp(P, fp.Pt_min, fp.Pt_max)
         h_min = enthalpy(fp, fp.Tt_min, Pc)
         h_max = enthalpy(fp, fp.Tt_max, Pc)
         return fp.itp_Th(Pc, clamp(h_target, h_min, h_max))
     end
-    invoke(T_from_h, Tuple{FluidProperties,Float64,Float64}, fp, h_target, P; T_guess)
+    # bisection fallback (returns primal; does not propagate AD derivatives)
+    T_lo, T_hi = 100.0, 5000.0
+    for _ in 1:60
+        T_mid = 0.5 * (T_lo + T_hi)
+        enthalpy(fp, T_mid, P) < h_target ? (T_lo = T_mid) : (T_hi = T_mid)
+        (T_hi - T_lo) < 1e-6 && break
+    end
+    0.5 * (T_lo + T_hi)
 end
 
-function T_from_s(fp::FPTFluid, s_target::Float64, P::Float64;
-                  T_guess::Float64=500.0)::Float64
+function T_from_s(fp::FPTFluid, s_target, P; T_guess=500.0)
     if !isnothing(fp.itp_Ts)
         Pc = clamp(P, fp.Pt_min, fp.Pt_max)
         s_min = entropy(fp, fp.Tt_min, Pc)
         s_max = entropy(fp, fp.Tt_max, Pc)
         return fp.itp_Ts(Pc, clamp(s_target, s_min, s_max))
     end
-    invoke(T_from_s, Tuple{FluidProperties,Float64,Float64}, fp, s_target, P; T_guess)
+    # bisection fallback (returns primal; does not propagate AD derivatives)
+    T_lo, T_hi = 100.0, 5000.0
+    for _ in 1:60
+        T_mid = 0.5 * (T_lo + T_hi)
+        entropy(fp, T_mid, P) < s_target ? (T_lo = T_mid) : (T_hi = T_mid)
+        (T_hi - T_lo) < 1e-6 && break
+    end
+    0.5 * (T_lo + T_hi)
 end
 
 """
@@ -316,7 +328,7 @@ end
 
 Enthalpy at pressure Pt_out for an isentropic process from entropy s.
 """
-function h_from_s(fp::FPTFluid, s::Float64, P::Float64)::Float64
+function h_from_s(fp::FPTFluid, s, P)
     if !isnothing(fp.itp_hs)
         Pc = clamp(P, fp.Pt_min, fp.Pt_max)
         s_min = entropy(fp, fp.Tt_min, Pc)

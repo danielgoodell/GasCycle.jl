@@ -7,19 +7,20 @@ Duct element — constant-enthalpy flow with a total pressure loss.
 
 No residual equations; no independent variables.
 """
-mutable struct Duct <: AbstractElement
+mutable struct Duct{T<:Real} <: AbstractElement
     name::String
-    dPqP::Float64   # fractional total pressure loss (ΔP/P)
+    dPqP::T  # fractional total pressure loss (ΔP/P)
     inlet::Union{Port, Nothing}
     outlet::Union{Port, Nothing}
 end
 
-Duct(name::String; dPqP::Float64 = 0.02) = Duct(name, dPqP, nothing, nothing)
+Duct(name::String; dPqP = 0.02) =
+    Duct{typeof(dPqP)}(name, dPqP, nothing, nothing)
 
 function compute!(el::Duct, inlet::Port)::Port
     el.inlet = inlet
     s = inlet[]
-    outlet_state = update(s; Pt = s.Pt * (1.0 - el.dPqP))
+    outlet_state = update(s; Pt = s.Pt * (1 - el.dPqP))
     el.outlet = Port(outlet_state)
     el.outlet
 end

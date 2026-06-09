@@ -6,26 +6,26 @@ A small total pressure loss dPqP models flow friction through the heat source.
 
 Operating modes:
   :fixed_Q      — Q is given; Tt_out is computed from energy balance.
-  :fixed_TtExit — target Tt_out is given; Q is the independent variable
-                  (residual: Tt_out_computed - TtExit_target = 0).
+  :fixed_TtExit — target Tt_out is given; Q is computed from energy balance.
 """
-mutable struct HeatSource <: AbstractElement
+mutable struct HeatSource{T<:Real} <: AbstractElement
     name::String
-    Q::Float64           # heat addition [W]  (positive = heat in)
-    TtExit::Float64      # target exit total temperature [K]  (:fixed_TtExit mode)
-    dPqP::Float64        # fractional total pressure loss
-    mode::Symbol         # :fixed_Q or :fixed_TtExit
+    Q::T         # heat addition [W]  (positive = heat in)
+    TtExit::T    # target exit total temperature [K]  (:fixed_TtExit mode)
+    dPqP::T      # fractional total pressure loss
+    mode::Symbol # :fixed_Q or :fixed_TtExit
 
     inlet::Union{Port, Nothing}
     outlet::Union{Port, Nothing}
 end
 
 function HeatSource(name::String;
-                    Q::Float64       = 0.0,
-                    TtExit::Float64  = 1200.0,
-                    dPqP::Float64    = 0.02,
-                    mode::Symbol     = :fixed_TtExit)
-    HeatSource(name, Q, TtExit, dPqP, mode, nothing, nothing)
+                    Q       = 0.0,
+                    TtExit  = 1200.0,
+                    dPqP    = 0.02,
+                    mode::Symbol = :fixed_TtExit)
+    T = promote_type(typeof(Q), typeof(TtExit), typeof(dPqP))
+    HeatSource{T}(name, T(Q), T(TtExit), T(dPqP), mode, nothing, nothing)
 end
 
 function compute!(el::HeatSource, inlet::Port)::Port
@@ -33,13 +33,15 @@ function compute!(el::HeatSource, inlet::Port)::Port
     s = inlet[]
     fp = s.fluid
 
-    Pt_out = s.Pt * (1.0 - el.dPqP)
+    Pt_out = s.Pt * (1 - el.dPqP)
 
     if el.mode == :fixed_TtExit
         Tt_out = el.TtExit
         h_out  = enthalpy(fp, Tt_out, Pt_out)
         h_in   = enthalpy(fp, s.Tt,   s.Pt)
-        el.Q   = (h_out - h_in) * s.W
+        Q_val  = (h_out - h_in) * s.W
+        # Only store if type matches; in AD context Q_val may be Dual while el.Q is Float64
+        Q_val isa typeof(el.Q) && (el.Q = Q_val)
     else  # :fixed_Q
         h_in   = enthalpy(fp, s.Tt, s.Pt)
         h_out  = h_in + el.Q / s.W
@@ -51,7 +53,6 @@ function compute!(el::HeatSource, inlet::Port)::Port
     el.outlet
 end
 
-# compute! handles both modes directly — no solver participation needed.
 n_residuals(el::HeatSource)          = 0
 residuals(el::HeatSource)            = Float64[]
 indep_vars(el::HeatSource)           = Float64[]
