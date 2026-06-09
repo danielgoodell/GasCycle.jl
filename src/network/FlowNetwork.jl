@@ -223,15 +223,20 @@ end
 # ── one_pass! ─────────────────────────────────────────────────────────────────
 
 """
-    one_pass!(net)
+    one_pass!(net[, back_edge_seeds])
 
 Propagate thermodynamic state through all elements once, in topological order.
 
-Back-edge inlets (e.g., recuperator hot side) are pre-seeded with the source
-element's stored outlet from the *previous* pass, enabling fixed-point iteration
-to resolve circular dependencies.
+If `back_edge_seeds` is provided, it must be a flat vector of alternating
+[Tt₁, Pt₁, Tt₂, Pt₂, …] for each back-edge (in the order they appear in
+`net.edges`). This replaces the stored-outlet seeding used by fixed-point
+iteration and allows the NonlinearSolve.jl Newton to differentiate through
+the pass — including when seeds carry ForwardDiff Dual numbers.
+
+Without `back_edge_seeds`, falls back to seeding from the source element's
+stored outlet of the previous pass (legacy fixed-point behaviour).
 """
-function one_pass!(net::FlowNetwork)
+function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
     isnothing(net.seed_state) && error("call set_state! before solving")
 
     avail = _AvailMap()
@@ -239,15 +244,28 @@ function one_pass!(net::FlowNetwork)
     # Seed the initial element's inlet
     avail[(net.seed_el, :inlet)] = Port(net.seed_state)
 
-    # Pre-seed back-edge inlets from the source element's stored outlet
+    # Pre-seed back-edge inlets
+    be_idx = 0
     for edge in net.edges
         edge.back_edge || continue
+        be_idx += 1
         src_out = _get_outlet(net.elements[edge.src], edge.src_port)
-        if isnothing(src_out)
-            # First pass: no stored value yet — fall back to seed state
-            avail[(edge.dst, edge.dst_port)] = Port(net.seed_state)
+
+        if !isnothing(back_edge_seeds)
+            # Explicit seeds: caller supplies Tt and Pt for each back-edge.
+            # W and fluid come from net.seed_state (always Float64 or the outer
+            # Dual if W is a design param) — this avoids inheriting inner-Dual
+            # contamination from a previous AutoForwardDiff Jacobian pass.
+            # W is conserved in closed cycles, so seed_state.W == flow at any
+            # back-edge (splits recombine in Mixers before the turbine).
+            Tt_s = back_edge_seeds[2*be_idx - 1]
+            Pt_s = back_edge_seeds[2*be_idx]
+            avail[(edge.dst, edge.dst_port)] =
+                Port(FluidState(Pt_s, Tt_s, net.seed_state.W, net.seed_state.fluid))
         else
-            avail[(edge.dst, edge.dst_port)] = src_out
+            # Legacy: seed from stored outlet of previous pass.
+            avail[(edge.dst, edge.dst_port)] =
+                isnothing(src_out) ? Port(net.seed_state) : src_out
         end
     end
 

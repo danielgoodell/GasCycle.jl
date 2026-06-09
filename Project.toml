@@ -1,14 +1,16 @@
 name = "GasCycle"
 uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-authors = ["GasCycle Contributors"]
 version = "0.1.0"
+authors = ["GasCycle Contributors"]
 
 [deps]
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NonlinearSolve = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
 
 [compat]
-julia = "1.9"
 ForwardDiff = "0.10"
 Interpolations = "0.15"
+NonlinearSolve = "4.12.0"
+julia = "1.9"
