@@ -76,7 +76,7 @@ for TIT_R in TIT_range_R
 
     T_tout  = K_to_R(turb.outlet[].Tt)
     T_rout  = K_to_R(recup.hot_outlet[].Tt)
-    PR_t    = turb.PR
+    PR_t    = pressure_ratio(turb)
 
     println("$(round(TIT_R,digits=1)), $(round(R_to_K(TIT_R),digits=1)), " *
             "$(round(W_shaft,digits=3)), $(round(W_elec,digits=3)), " *

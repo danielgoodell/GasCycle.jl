@@ -82,3 +82,13 @@ end
 """Work input per unit mass flow [J/kg]"""
 specific_work(el::Compressor) =
     enthalpy(el.outlet[]) - enthalpy(el.inlet[])
+
+"""
+    pressure_ratio(el::Compressor) -> Real
+
+Actual pressure ratio Pt_out / Pt_in from the last computed state.
+Falls back to `el.PR` if the element has not been computed yet.
+"""
+pressure_ratio(el::Compressor) =
+    (isnothing(el.inlet) || isnothing(el.outlet)) ? el.PR :
+    el.outlet[].Pt / el.inlet[].Pt

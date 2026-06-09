@@ -121,7 +121,7 @@ Tt_turb_out       = turb.outlet[].Tt
 Tt_recup_hot_out  = recup.hot_outlet[].Tt
 Tt_bleed_in       = bsplit.outlets[2][].Tt  # bleed state entering cooler
 Tt_bleed_mixed    = bmix.outlet[].Tt        # mixed state at turbine inlet
-PR_turb_actual    = heater.outlet[].Pt / turb.outlet[].Pt
+PR_turb_actual    = pressure_ratio(turb)
 
 function toR(T_K); round(T_K * 9/5, digits=0); end
 function topsia(P_Pa); round(P_Pa/6894.757, digits=2); end
@@ -137,7 +137,7 @@ println("Turbine outlet T:        $(round(Tt_turb_out,digits=1)) K ($(toR(Tt_tur
 println("Recup hot outlet T:      $(round(Tt_recup_hot_out,digits=1)) K ($(toR(Tt_recup_hot_out)) °R)   ~786 °R  (437 K) [NPSS]")
 println()
 
-PR_c = comp.outlet[].Pt / comp.inlet[].Pt
+PR_c = pressure_ratio(comp)
 println("Compressor PR:           $(round(PR_c, digits=3))           1.9 [design]")
 println("Turbine PR:              $(round(PR_turb_actual, digits=3))           ~1.75 [design]")
 println("Turb inlet P:            $(topsia(heater.outlet[].Pt)) psia          43.2 psia [design]")

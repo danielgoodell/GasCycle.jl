@@ -1,5 +1,4 @@
 using Test
-using Pkg; Pkg.activate(joinpath(@__DIR__, ".."))
 using GasCycle
 import GasCycle: cp
 

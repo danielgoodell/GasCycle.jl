@@ -92,3 +92,15 @@ end
 
 specific_work(el::Turbine) =
     enthalpy(el.inlet[]) - enthalpy(el.outlet[])
+
+"""
+    pressure_ratio(el::Turbine) -> Real
+
+Actual expansion ratio Pt_in / Pt_out from the last computed state.  Unlike
+the `el.PR` field, this is correct in :pressure_closure mode, where the
+effective PR is computed locally and `el.PR` is left unchanged.  Falls back
+to `el.PR` if the element has not been computed yet.
+"""
+pressure_ratio(el::Turbine) =
+    (isnothing(el.inlet) || isnothing(el.outlet)) ? el.PR :
+    el.inlet[].Pt / el.outlet[].Pt

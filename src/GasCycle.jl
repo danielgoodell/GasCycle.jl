@@ -40,7 +40,7 @@ export update
 export PerformanceMap, scale_map, query, corrected_speed, corrected_flow
 
 export Compressor, Turbine, Duct, Shaft, HeatSource, HeatExchanger, Splitter, Mixer
-export compute!, compute_hx!, specific_work, Q_transferred, power_balance
+export compute!, compute_hx!, specific_work, pressure_ratio, Q_transferred, power_balance
 export n_residuals, residuals, indep_vars, set_indep_vars!
 export link!
 

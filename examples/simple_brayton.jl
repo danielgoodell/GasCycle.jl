@@ -48,7 +48,7 @@ sol = solve!(net; verbose=true)
 
 println("\n=== Simple Brayton Cycle Results ===")
 println("Compressor PR:         $(round(comp.PR, digits=3))")
-println("Turbine PR:            $(round(turb.PR, digits=3))")
+println("Turbine PR:            $(round(pressure_ratio(turb), digits=3))")
 println("Compressor Tt_out:     $(round(comp.outlet[].Tt, digits=1)) K")
 println("Turbine Tt_out:        $(round(turb.outlet[].Tt, digits=1)) K")
 println("Net power:             $(round(net_power(sol)/1000, digits=2)) kW")
