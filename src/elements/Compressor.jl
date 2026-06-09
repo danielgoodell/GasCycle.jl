@@ -52,18 +52,9 @@ function compute!(el::Compressor, inlet::Port)::Port
         el.Wc_map = Wc_act
     end
 
-    fp = s.fluid
-    h_in = enthalpy(fp, s.Tt, s.Pt)
-    s_in = entropy(fp, s.Tt, s.Pt)
-
+    fp     = s.fluid
     Pt_out = s.Pt * el.PR
-
-    Tt_is = T_from_s(fp, s_in, Pt_out; T_guess = s.Tt * el.PR^0.3)
-
-    h_is_out = enthalpy(fp, Tt_is, Pt_out)
-    h_out    = h_in + (h_is_out - h_in) / el.η_poly
-
-    Tt_out = T_from_h(fp, h_out, Pt_out; T_guess = Tt_is * 1.1)
+    Tt_out = _polytropic_outlet(fp, s.Tt, s.Pt, Pt_out, el.η_poly)
 
     outlet_state = update(s; Pt = Pt_out, Tt = Tt_out)
     el.outlet = Port(outlet_state)

@@ -73,13 +73,13 @@ The `examples/bru_10kw.jl` model reproduces the NASA Brayton Rotating Unit (BRU,
 
 | Quantity | GasCycle | NPSS / paper |
 |---|---|---|
-| Compressor outlet T | 418 K (751 °R) | 409 K (737 °R) |
-| Turbine outlet T | 917 K (1651 °R) | 945 K (1701 °R) |
+| Compressor outlet T | 422 K (759 °R) | 409 K (737 °R) |
+| Turbine outlet T | 914 K (1645 °R) | 945 K (1701 °R) |
 | Turbine PR | 1.758 | ~1.75 |
-| Net shaft power | 13.8 kW | ~13.4 kW |
-| Est. electrical output | 11.2 kW | 10.5 kW design |
+| Net shaft power | 13.6 kW | ~13.4 kW |
+| Est. electrical output | 11.1 kW | 10.5 kW design |
 
-The ~2% power offset is consistent with the difference between the NPSS `CEAT` thermodynamic model and the HeXe84.fpt fluid table.
+Both models use the same HeXe84.fpt fluid table. GasCycle implements true polytropic efficiency (N=20 step numerical integration of dh = v dP / η_p). The NPSS BRU model appears to use isentropic efficiency semantics with the same η=0.80 value — for ideal-gas He-Xe at PR=1.9, isentropic η=0.80 gives ~410 K and polytropic η_p=0.80 gives ~414 K, consistent with the observed offset. The remaining gap is FPT interpolation differences (GasCycle bicubic B-spline vs. NPSS's scheme). Net power agrees to within ~1.5%.
 
 ## Architecture
 
