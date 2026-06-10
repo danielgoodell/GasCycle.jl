@@ -1,0 +1,8 @@
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+GasCycle = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+[compat]
+BenchmarkTools = "1"
+ForwardDiff = "0.10"

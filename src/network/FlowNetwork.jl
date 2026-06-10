@@ -37,6 +37,14 @@ struct PortEdge
     back_edge::Bool   # true → seed from stored outlet; don't wait for src to run
 end
 
+struct _FlowPlan
+    forward_edges_by_src::Vector{Vector{PortEdge}}
+    back_edges::Vector{PortEdge}
+    required_inlets::Vector{Vector{Symbol}}
+    n_elements::Int
+    n_edges::Int
+end
+
 # ── Network struct ────────────────────────────────────────────────────────────
 
 mutable struct FlowNetwork
@@ -45,9 +53,12 @@ mutable struct FlowNetwork
     shafts::Vector{Shaft}
     seed_el::Int                       # element whose primary inlet is seeded
     seed_state::Union{FluidState,Nothing}
+    plan::Union{_FlowPlan,Nothing}
 end
 
-FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing)
+FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing, nothing)
+
+_invalidate_plan!(net::FlowNetwork) = (net.plan = nothing)
 
 # ── Element lookup ────────────────────────────────────────────────────────────
 
@@ -119,12 +130,65 @@ function _required_inlets(el::AbstractElement)::Vector{Symbol}
     [:inlet]
 end
 
-function _unprocessed_error(net::FlowNetwork, processed::AbstractVector{Bool}, avail::_AvailMap)
+function _compile_plan(net::FlowNetwork)
+    forward_edges_by_src = [PortEdge[] for _ in eachindex(net.elements)]
+    back_edges = PortEdge[]
+    for edge in net.edges
+        if edge.back_edge
+            push!(back_edges, edge)
+        else
+            push!(forward_edges_by_src[edge.src], edge)
+        end
+    end
+
+    required_inlets = [_required_inlets(el) for el in net.elements]
+    _FlowPlan(forward_edges_by_src, back_edges, required_inlets,
+              length(net.elements), length(net.edges))
+end
+
+function _flow_plan!(net::FlowNetwork)
+    plan = net.plan
+    if isnothing(plan) ||
+       plan.n_elements != length(net.elements) ||
+       plan.n_edges != length(net.edges)
+        plan = _compile_plan(net)
+        net.plan = plan
+    end
+    plan
+end
+
+function _store_available!(avail::_AvailMap, net::FlowNetwork,
+                           el_idx::Int, port::Symbol, p::Port)
+    avail[(el_idx, port)] = p
+
+    # Keep the serial-chain `:inlet` alias for a heat exchanger's cold side.
+    if port == :inlet && net.elements[el_idx] isa HeatExchanger
+        avail[(el_idx, :cold_inlet)] = p
+    end
+end
+
+function _inlets_available(plan::_FlowPlan, el_idx::Int, avail::_AvailMap)
+    all(p -> haskey(avail, (el_idx, p)), plan.required_inlets[el_idx])
+end
+
+function _maybe_enqueue!(ready::Vector{Int}, queued::AbstractVector{Bool},
+                         processed::AbstractVector{Bool}, plan::_FlowPlan,
+                         el_idx::Int, avail::_AvailMap)
+    processed[el_idx] && return nothing
+    queued[el_idx] && return nothing
+    _inlets_available(plan, el_idx, avail) || return nothing
+    push!(ready, el_idx)
+    queued[el_idx] = true
+    nothing
+end
+
+function _unprocessed_error(net::FlowNetwork, plan::_FlowPlan,
+                            processed::AbstractVector{Bool}, avail::_AvailMap)
     parts = String[]
     for el_idx in eachindex(net.elements)
         processed[el_idx] && continue
         el = net.elements[el_idx]
-        missing = [p for p in _required_inlets(el) if !haskey(avail, (el_idx, p))]
+        missing = [p for p in plan.required_inlets[el_idx] if !haskey(avail, (el_idx, p))]
         push!(parts,
               "$(el.name) ($(typeof(el))): missing " *
               join(string.(":", missing), ", "))
@@ -177,6 +241,7 @@ function add!(net::FlowNetwork, elements::AbstractElement...)
     for el in elements
         isa(el, Shaft) ? push!(net.shafts, el) : push!(net.elements, el)
     end
+    _invalidate_plan!(net)
 end
 
 """
@@ -195,6 +260,7 @@ function connect!(net::FlowNetwork, chain)
     for i in 1:length(idxs)-1
         push!(net.edges, PortEdge(idxs[i], :outlet, idxs[i+1], :inlet, false))
     end
+    _invalidate_plan!(net)
 end
 
 _flatten_chain(p::Pair) = [_flatten_chain(p.first)..., _flatten_chain(p.second)...]
@@ -211,6 +277,7 @@ function connect_port!(net::FlowNetwork,
                        dst::AbstractElement, dst_port::Symbol)
     push!(net.edges,
           PortEdge(_el_idx(net, src), src_port, _el_idx(net, dst), dst_port, false))
+    _invalidate_plan!(net)
 end
 
 """Add a shaft and link it to its producers and consumers."""
@@ -234,6 +301,7 @@ function add_hx_pair!(net::FlowNetwork, hx::HeatExchanger;
                       hot::AbstractElement, cold::Union{AbstractElement,Nothing}=nothing)
     push!(net.edges,
           PortEdge(_el_idx(net, hot), :outlet, _el_idx(net, hx), :hot_inlet, true))
+    _invalidate_plan!(net)
 end
 
 """Set the thermodynamic inlet state at the first element in the loop."""
@@ -262,15 +330,15 @@ stored outlet of the previous pass (legacy fixed-point behaviour).
 function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
     isnothing(net.seed_state) && error("call set_state! before solving")
 
+    plan = _flow_plan!(net)
     avail = _AvailMap()
 
     # Seed the initial element's inlet
-    avail[(net.seed_el, :inlet)] = Port(net.seed_state)
+    _store_available!(avail, net, net.seed_el, :inlet, Port(net.seed_state))
 
     # Pre-seed back-edge inlets
     be_idx = 0
-    for edge in net.edges
-        edge.back_edge || continue
+    for edge in plan.back_edges
         be_idx += 1
         src_out = _get_outlet(net.elements[edge.src], edge.src_port)
 
@@ -286,48 +354,44 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
             Pt_s = back_edge_seeds[2*be_idx]
             base = isnothing(src_out) ? net.seed_state : src_out[]
             W_s = _strip_to_type(base.W, typeof(net.seed_state.W))
-            avail[(edge.dst, edge.dst_port)] =
-                Port(FluidState(Pt_s, Tt_s, W_s, base.fluid))
+            _store_available!(avail, net, edge.dst, edge.dst_port,
+                              Port(FluidState(Pt_s, Tt_s, W_s, base.fluid)))
         else
             # Legacy: seed from stored outlet of previous pass.
-            avail[(edge.dst, edge.dst_port)] =
-                isnothing(src_out) ? Port(net.seed_state) : src_out
+            _store_available!(avail, net, edge.dst, edge.dst_port,
+                              isnothing(src_out) ? Port(net.seed_state) : src_out)
         end
     end
 
-    # Topological traversal: repeatedly find elements whose inlets are all
-    # available, compute them, then propagate their outlets downstream.
+    # Topological traversal: process elements as soon as all required inlets
+    # are available, then propagate only the outgoing edges from that element.
     processed = falses(length(net.elements))
-    changed   = true
-    while changed
-        changed = false
-        for el_idx in 1:length(net.elements)
-            processed[el_idx] && continue
-            net.elements[el_idx] isa Shaft && (processed[el_idx] = true; continue)
+    queued = falses(length(net.elements))
+    ready = Int[]
+    for el_idx in eachindex(net.elements)
+        _maybe_enqueue!(ready, queued, processed, plan, el_idx, avail)
+    end
 
-            # Check all required inlets are available
-            all(p -> haskey(avail, (el_idx, p)),
-                _required_inlets(net.elements[el_idx])) || continue
+    head = 1
+    while head <= length(ready)
+        el_idx = ready[head]
+        head += 1
+        queued[el_idx] = false
+        processed[el_idx] && continue
+        _inlets_available(plan, el_idx, avail) || continue
 
-            _compute_element!(net, el_idx, avail)
-            processed[el_idx] = true
-            changed = true
+        _compute_element!(net, el_idx, avail)
+        processed[el_idx] = true
 
-            # Propagate this element's outlets to downstream inlets via forward edges
-            for edge in net.edges
-                (edge.src == el_idx && !edge.back_edge) || continue
-                out = get(avail, (el_idx, edge.src_port), nothing)
-                isnothing(out) && continue
-                avail[(edge.dst, edge.dst_port)] = out
-                # Normalize :inlet → :cold_inlet for HeatExchanger destinations
-                if edge.dst_port == :inlet && net.elements[edge.dst] isa HeatExchanger
-                    avail[(edge.dst, :cold_inlet)] = out
-                end
-            end
+        for edge in plan.forward_edges_by_src[el_idx]
+            out = get(avail, (el_idx, edge.src_port), nothing)
+            isnothing(out) && continue
+            _store_available!(avail, net, edge.dst, edge.dst_port, out)
+            _maybe_enqueue!(ready, queued, processed, plan, edge.dst, avail)
         end
     end
 
-    all(processed) || _unprocessed_error(net, processed, avail)
+    all(processed) || _unprocessed_error(net, plan, processed, avail)
 
     # Shaft speed broadcast
     for sh in net.shafts
