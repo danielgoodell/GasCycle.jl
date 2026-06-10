@@ -33,6 +33,7 @@ include("solver/Solver.jl")
 
 # ── Output ────────────────────────────────────────────────────────────────────
 include("output/Summary.jl")
+include("output/PlotRecipes.jl")
 
 # ── Public API ────────────────────────────────────────────────────────────────
 export R_to_K, K_to_R, psia_to_Pa, Pa_to_psia
@@ -59,5 +60,6 @@ export link!
 export FlowNetwork, add!, connect!, connect_port!, add_shaft!, add_hx_pair!, set_state!, one_pass!
 export solve!, cycle_efficiency, net_power, SolveResult
 export stations   # summary(sol) extends Base.summary — no export needed
+export tsdiagram, tsdiagram!, mapplot, mapplot!   # RecipesBase user plots
 
 end # module GasCycle

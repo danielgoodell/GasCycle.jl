@@ -37,25 +37,38 @@ _normal_out(el::HeatExchanger, port::Symbol) =
     port == :outlet ? :cold_outlet : port
 
 """
-    stations(net::FlowNetwork) -> Vector{Pair{String,FluidState}}
+    stations(net::FlowNetwork; branches=true) -> Vector{Pair{String,FluidState}}
 
 Ordered list of `"Element.port" => FluidState` stations.  The main flow path
 is walked first (following back-edges through heat-exchanger hot sides, so a
-closed loop reads in physical order); branch sub-paths (bleed flows) follow.
+closed loop reads in physical order); branch sub-paths (bleed flows) follow
+unless `branches=false`.
 """
-function stations(net::FlowNetwork)
+function stations(net::FlowNetwork; branches::Bool = true)
+    sts, _ = _station_paths(net; branches)
+    sts
+end
+
+stations(r::SolveResult; kwargs...) = stations(r.net; kwargs...)
+
+"""
+Walk the port graph.  Returns `(stations, closed)` where `closed` is true if
+the main path returned to the seed element (a closed cycle).
+"""
+function _station_paths(net::FlowNetwork; branches::Bool = true)
     isnothing(net.seed_state) && error("stations: call set_state! and solve! first")
 
     sts     = Pair{String,Any}[]
     emitted = Set{Tuple{Int,Symbol}}()
     visited = Set{Int}()
+    closed  = false
 
     seed = net.elements[net.seed_el]
     push!(sts, "$(seed.name).in" => net.seed_state)
 
     # Walk one flow path, emitting each element's exit station, until the loop
     # closes, the path ends, or an already-visited element is reached.
-    function walk!(el_idx::Int, entry::Symbol)
+    function walk!(el_idx::Int, entry::Symbol, main::Bool)
         for _ in 1:length(net.edges) + 1   # guard against malformed graphs
             el    = net.elements[el_idx]
             exitp = _exit_port(el, entry)
@@ -70,31 +83,34 @@ function stations(net::FlowNetwork)
                                _port_matches(el, e.src_port, exitp), net.edges)
             isnothing(i) && return
             edge = net.edges[i]
-            edge.dst == net.seed_el && edge.dst_port == :inlet && return
+            if edge.dst == net.seed_el && edge.dst_port == :inlet
+                main && (closed = true)
+                return
+            end
             el_idx, entry = edge.dst, edge.dst_port
         end
     end
 
-    walk!(net.seed_el, :inlet)
+    walk!(net.seed_el, :inlet, true)
 
-    # Branch sub-paths: any outlet port on a visited element that the main
-    # walk didn't pass through (e.g. a splitter's bleed outlet) starts one.
-    for edge in net.edges
-        edge.src in visited || continue
-        el = net.elements[edge.src]
-        np = _normal_out(el, edge.src_port)
-        (edge.src, np) in emitted && continue
-        out = _get_outlet(el, np)
-        isnothing(out) && continue
-        push!(sts, "$(el.name).$(_port_suffix(np))" => out[])
-        push!(emitted, (edge.src, np))
-        edge.dst in visited || walk!(edge.dst, edge.dst_port)
+    if branches
+        # Branch sub-paths: any outlet port on a visited element that the
+        # main walk didn't pass through (e.g. a splitter's bleed outlet).
+        for edge in net.edges
+            edge.src in visited || continue
+            el = net.elements[edge.src]
+            np = _normal_out(el, edge.src_port)
+            (edge.src, np) in emitted && continue
+            out = _get_outlet(el, np)
+            isnothing(out) && continue
+            push!(sts, "$(el.name).$(_port_suffix(np))" => out[])
+            push!(emitted, (edge.src, np))
+            edge.dst in visited || walk!(edge.dst, edge.dst_port, false)
+        end
     end
 
-    sts
+    (sts, closed)
 end
-
-stations(r::SolveResult) = stations(r.net)
 
 # ── Station table ─────────────────────────────────────────────────────────────
 

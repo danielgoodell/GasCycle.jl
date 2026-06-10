@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "00fe585c8a49012b7345764ba3918b4e30f6eb66"
+project_hash = "9fb5ff2c39dcf7acdf451b658ddda16f7213f161"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "bbc22a9a08a0ef6460041086d8a7b27940ed4ffd"
@@ -363,7 +363,7 @@ uuid = "46192b85-c4d5-4398-a991-12ede77f4527"
 version = "0.2.0"
 
 [[deps.GasCycle]]
-deps = ["ForwardDiff", "Interpolations", "LinearAlgebra"]
+deps = ["ForwardDiff", "Interpolations", "LinearAlgebra", "NonlinearSolve", "Printf"]
 path = "."
 uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 version = "0.1.0"
