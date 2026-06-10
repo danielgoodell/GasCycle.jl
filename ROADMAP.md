@@ -165,14 +165,24 @@ The original mission of this architecture (reactor coupling). Stage it:
   using the volumes from item 7, wrapped with DifferentialEquations.jl.
   Reactor side couples here (point kinetics or supplied Q(t)).
 
-### 10. Convenience batch (cheap, interleave anytime)
-- `summary(sol)`: NPSS-style station table (Tt/Pt/W/h at every port,
-  work/heat/η per component) — replaces hand-rolled println blocks.
-- NPSS `.map` file reader for real performance maps.
-- Plot recipes: T-s diagram, operating points on map contours, sweeps.
-- Exported unit helpers (R↔K, psia↔Pa, lbm/s↔kg/s) — every example
-  currently redefines them.
-- CI workflow (GitHub Actions) — `Pkg.test()` already works.
+### 10. Convenience batch  ✅ DONE (ef8c91d…354fa66, 2026-06-10)
+- `summary(sol)`: NPSS-style station table in physical flow order
+  (back-edges walked so the recuperator hot side reads in cycle position,
+  bleed branches after) + component table + cycle totals.  `stations(sol)`
+  returns the ordered station data.
+- NPSS `.map` reader: `read_npss_map` (generic NEO Table parser) +
+  `to_performance_map` (Rline speed lines → rectangular (Nc, Wc) map,
+  exact along each tabulated line).  Validated against a synthetic
+  format-faithful fixture only — **cross-check against a real NPSS map
+  when one is available**; maps operated near choke (vertical speed-line
+  segments) eventually want an Rline-native solver coordinate instead of
+  the rectangular resample.
+- Plot recipes (RecipesBase, no Plots dep): `tsdiagram(sol)`,
+  `mapplot(map_or_turbomachine)` with operating point.
+- Exported unit helpers (`R_to_K`, `psia_to_Pa`, `lbps_to_kgps`, BTU,
+  density, rpm, hp, all with inverses) — examples no longer redefine them.
+- CI workflow (GitHub Actions): `Pkg.test()` on latest stable; pinned
+  Manifest dropped in CI so runs resolve fresh against [compat].
 
 ### 11. Optimization showcase
 The never-built verification item 6 from the original plan: maximize cycle
