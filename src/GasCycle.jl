@@ -8,6 +8,7 @@ include("thermo/FluidProperties.jl")
 include("thermo/IdealGasFluid.jl")
 include("thermo/FPTFluid.jl")
 include("thermo/ConstantPropertyLiquid.jl")
+include("thermo/NobleGasMixture.jl")
 
 # ── Core abstractions ─────────────────────────────────────────────────────────
 include("core/FluidState.jl")
@@ -46,6 +47,8 @@ export lbmft3_to_kgm3, kgm3_to_lbmft3, rpm_to_radps, radps_to_rpm
 export hp_to_W, W_to_hp
 
 export FluidProperties, IdealGasFluid, HeXeIdealGas, FPTFluid, ConstantPropertyLiquid
+export NobleGas, NobleGasMixture, NobleGasFluid, HeXe
+export HELIUM, NEON, ARGON, KRYPTON, XENON
 # Note: `cp` is not exported to avoid conflict with Base.Filesystem.cp in Julia ≥ 1.12.
 # Use GasCycle.cp(...) or `import GasCycle: cp` to access it.
 export enthalpy, entropy, density, gamma, T_from_h, T_from_s, h_from_s
