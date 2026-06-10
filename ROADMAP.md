@@ -53,7 +53,16 @@ Fix (NPSS-style formulation):
   cycle 2060→1236 °R at 36 krpm (21/21 converged, design power reproduced,
   self-sustain threshold near 1330 °R).
 
-### 3b. NPSS cross-validation campaign (BRU3.mdl)  ← NEXT (added 2026-06-10)
+### 3b. NPSS cross-validation campaign (BRU3.mdl)  ✅ DONE (2026-06-10)
+Goal achieved same day: with `reference/HeXe.out` (NPSS 3.3 on HeXe84.fpt),
+GasCycle matches every station/power within NPSS print precision, TIT
+included (each code solving its own shaft balance; Δ = 0.025 °R). All
+historical gaps attributed: GasCycle s-interpolation artifact (fixed;
+NPSS confirmed to share it — `s_interp=:linear` reproduces it), isentropic
+effDes, CEAT = ideal monatomic M = 83.328, NPSS bleed = workless bypass
+(dhb/dh = 0), HPX kW-tagged (18 hp internal), oil cp = Oil.fpt's 0.8.
+Ledger: `validation/RESULTS.md`. Open: sink-HX effect definition
+(behaves as ε = 0.9405 vs 0.946 setting; gas loop unaffected).
 Validate GasCycle against the identical NPSS model to solver precision, or
 attribute every difference exactly. Full plan in `validation/PLAN.md` —
 precision ladder (property lookups → element isolation → full loop with

@@ -1,0 +1,57 @@
+CUI // SP-EXPT // FEDCON                                                                                                                        
+*******************************************************************************                                                                 
+NCP                     NPSS_3.3    model:                    run by:     dgoodell    solutionMode= STEADY_STATE    converge=    1    case:    0
+time:  0.000    timeStep:0.0500     therm_package:   FPT   iter/pas/Jac/Broy=  4/ 10/ 1/ 2     run: 06/10/26 15:54:40                           
+                                                                                                                                                
+                                                                                                                                                
+
+          INPUT FLOW                                                                                                               
+                         W        Pt        Tt           s       ht     FAR       Wc        Ps        Ts     Aphy      MN      gamt
+station0  Start.>     1.32    23.700    540.00    2.82E-01    61.54  0.0000     0.84     0.000      0.00      0.0  0.0000   1.66743
+station1  Comp.F>     1.29    45.030    751.47    2.86E-01    74.03  0.0000     0.51     0.000      0.00      0.0  0.0000   1.66880
+station2  Comp.B>     0.03    45.030    559.00    2.68E-01    62.57  0.0000     0.01     0.000      0.00      0.0  0.0000   1.66819
+station7  HotSta>     1.32    24.660   1624.41    3.46E-01   125.70  0.0000     1.39     0.000      0.00      0.0  0.0000   1.66746
+station4  Recup.>     1.29    44.535   1580.77    3.30E-01   123.12  0.0000     0.75     0.000      0.00      0.0  0.0000   1.66813
+station8  Recup.>     1.32    24.117    810.74    3.06E-01    77.59  0.0000     1.01     0.000      0.00      0.0  0.0000   1.66782
+station10 Dow200>     0.14    20.700    515.97        -nan   412.77  0.0000     0.10     0.000      0.00      0.0  0.0000      -nan
+station11 Pump.F>     0.14    90.653    522.88        -nan   418.31  0.0000     0.02     0.000      0.00      0.0  0.0000      -nan
+station12 HeatSi>     0.14    90.200    712.11        -nan   569.69  0.0000     0.03     0.000      0.00      0.0  0.0000      -nan
+station9  HeatSi>     1.32    23.700    540.00    2.82E-01    61.54  0.0000     0.84     0.000      0.00      0.0  0.0000   1.66743
+station5  HeatSo>     1.29    43.332   2024.04    3.45E-01   149.31  0.0000     0.87     0.000      0.00      0.0  0.0000   1.66778
+station13 Radiat>     0.14    20.700    527.00        -nan   421.60  0.0000     0.10     0.000      0.00      0.0  0.0000      -nan
+station6  Turb.F>     1.32    24.660   1624.41    3.46E-01   125.70  0.0000     1.39     0.000      0.00      0.0  0.0000   1.66746
+
+                                                                            COMPRESSORS & TURBINES                                                     
+            DUCTS                                                                  Wc      PR       TR   efPoly      eff       Nc     pwrkW        Tout
+                dPqP    MNin     Aphy                             Comp           0.84   1.900   1.3916   0.8176   0.8000  35281.8     -17.1            
+HeatSourc>   0.02700  0.0000     0.00                             Turb           0.87   1.757   1.2295   0.8452   0.8700    800.2      30.5            
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                            ADDERS AND SCALARS                                                         
+          HEAT EXCHANGERS                                                   s_WcAud  a_WcAud  s_effAud  a_effAud                                       
+              effect                                              Comp       1.0000   0.0000    1.0000    0.0000                                       
+Recup        0.95000                                              Turb       1.0000   0.0000   1.0000   0.0000    1.0000    0.0000                     
+HeatSinkHx   0.94600                                                                                                                                   
+                                                                            BLEEDS                                                                     
+                                                                                             Wb/Win   dhb/dh   dPb/dP         Tt        ht             
+                                                                  station2 Comp.Bld          0.0200   0.0000   1.0000     559.00     62.57             
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+          SHAFTS                                                                                                                                       
+            Nmech    trqIn    trqNet    pwrIn     HPX    dNqdt                                                                                         
+HPshaft   36000.0      6.0    0.0000     40.9   18.00     0.00                                                                                         
+                                                                                                                                                       
+          INERTIA                                                                                                                                      
+          inertia  inertiaSum                                                                                                                          
+HPshaft      0.00        0.00                                                                                                                          
+Comp              0.00                                                                                                                                 
+Turb              0.00                                                                                                                                 
+                                                                                                                                                       
+
+CUI // SP-EXPT // FEDCON
+
+
+
+
+

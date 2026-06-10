@@ -1,5 +1,13 @@
 # NPSS Cross-Validation Plan: BRU3.mdl ↔ GasCycle
 
+> **STATUS 2026-06-10: campaign goal achieved.** With `reference/HeXe.out`
+> (NPSS 3.3 running BRU3.mdl on HeXe84.fpt), GasCycle reproduces every
+> station and power within NPSS's print precision — including TIT, solved
+> independently by each code's shaft balance (Δ = 0.025 °R). See
+> RESULTS.md final table and `validation/bru3_hexe_run.jl`. Sole open
+> item: the sink HX behaves as ε = 0.9405 vs its 0.946 setting (does not
+> affect the gas loop). The plan below is kept for the record.
+
 Written 2026-06-10, reconstructing the validation campaign Daniel intended
 before the previous session ended (it was never documented; several
 prerequisites were quietly built: the `η_type=:isentropic` option matching

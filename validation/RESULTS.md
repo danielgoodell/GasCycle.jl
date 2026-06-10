@@ -192,3 +192,69 @@ flow-bookkeeping effects; station 12's 14.4 °R is the oil-cp issue.
 **In other words: the collaborator's flagged discrepancies are not
 mysteries — they are the .mdl's own known issues (bleed port, missing
 heater ΔP, oil cp), now quantified individually.**
+
+## 2026-06-10 — HeXe.out: SOLVER-PRECISION MATCH ACHIEVED (campaign goal met)
+
+Daniel got NPSS 3.3 running and produced `reference/HeXe.out`: BRU3.mdl
+converged (4 iterations) with **the same HeXe84.fpt table GasCycle reads**.
+Replication: `validation/bru3_hexe_run.jl`.
+
+**Rung 0 — exact.** ht and s match every printed digit at every gas
+station; γ matches all five printed digits (1.66743 / 1.66880 / 1.66778 /
+1.66746). Table parsing, unit constants, and reference states are
+identical.
+
+**NPSS's FPT interpolation is linear-in-P — confirmed to 0.002 °R.** NPSS
+station 1 prints 751.47 °R: exactly GasCycle's `s_interp=:linear` value
+(751.468), i.e. NPSS carries the same mid-cell entropy artifact we found
+and fixed at rung 0 (+14 °R at this state vs the physical 737.16).
+GasCycle's default `:log_pressure` mode is the *more correct* answer;
+`:linear` exists precisely to reproduce NPSS.
+
+**Run configuration recovered from the listing:** machines isentropic
+(eff = 0.8000/0.8700 printed exactly; efPoly 0.8176/0.8452 derived);
+turbine PR floated to 1.757 = our predicted pressure-closure value; TIT
+floated to 2024.04 °R via shaft balance; heater ΔP present; sink gas
+dPqP = 0.0173; tear mass-consistent (W = 1.32 both sides — fixed since the
+Excel run). **HPX resolved:** displays 18.00 hp = 13.42 kW — the .mdl's
+expression is kW-tagged and NPSS stores hp internally. **Oil cp resolved:**
+the listing's oil-side energy balance implies 0.7999 BTU/(lbm·R) and
+ht = 0.8·T exactly — Oil.fpt's constants. **Recup `effect` resolved:**
+C_min-based ε (cold-side prediction exact to 0.08 °R at ε = 0.95).
+
+**Bleed bookkeeping decoded (dhb/dh = 0, dPb/dP = 1):** NPSS's interstage
+bleed does no work in either machine — comp pwr 17.1 = main-flow-only Δh
+(full-flow is 17.40), and the turbine expands the main flow alone with the
+559 °R bleed diluting at the *exit* (main-only 1646.4 °R → mixed 1624.6 ≈
+1624.41). Physically the bleed is granted free recompression to 45 psia;
+GasCycle replicates it as a split-before-compressor bypass with a free
+repressurization, mixed after the turbine.
+
+**Final comparison (both codes solving their own shaft balance, TIT an
+output of each):**
+
+| quantity | GasCycle (:linear) | NPSS | Δ |
+|---|---|---|---|
+| TIT (solved) | 2024.015 °R | 2024.04 | −0.025 |
+| comp outlet | 751.468 °R | 751.47 | −0.002 |
+| turbine outlet (mixed) | 1624.395 °R | 1624.41 | −0.015 |
+| recup cold out | 1580.691 °R | 1580.77 | −0.079 |
+| recup hot out | 810.789 °R | 810.74 | +0.049 |
+| turbine PR / exit Pt | 1.757 / 24.660 | 1.757 / 24.660 | exact |
+| comp / turb power | 17.051 / 30.471 kW | "17.1" / "30.5" | within print rounding |
+| net = HPX | 13.420 kW | 13.42 | exact |
+
+**That is the campaign's success criterion: agreement within solver/print
+precision, with every contributing modeling choice named.** The one
+remaining open item: the sink HX behaves as ε = 0.9405 vs its 0.946
+setting (the recuperator honors its setting exactly) — it does not affect
+the gas loop (the oil inlet temperature is NPSS's closure knob and floats
+to absorb it), but it is worth one collaborator question for completeness.
+
+**Physical-mode footnote:** with GasCycle's default `:log_pressure`
+entropy interpolation (the artifact-free answer on the same table), the
+same model solves to TIT = 2083 °R, comp outlet 737.2 °R, net 13.42 kW —
+i.e. NPSS's converged TIT is ~59 °R below the physically-consistent value
+because of its s-table interpolation. For mission work (SR-1 off-design,
+inventory, transients) GasCycle's default mode is the one to trust;
+`:linear` is for NPSS cross-checks.
