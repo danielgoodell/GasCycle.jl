@@ -119,13 +119,25 @@ table precision. Each rung has a harness in `validation/`.
 1. Full design-point output listing of BRU3.mdl as-is (`ncpView` station
    table: Tt, Pt, W, ht, s at stations 0–13; comp/turb `pwr`; HX Q's;
    converged independents TIT/PR_t/Pt₆; solver tolerance used).
+   **Still the top request** — it pins the last ~1 °R / 2 % residuals.
 2. The four `cout` lines from the isolation diagnostic section.
-3. A rerun with `fs.comp = "HeXe84"` (preferred) **or** the CEAT FPT file.
+3. ~~A rerun with `fs.comp = "HeXe84"` or the CEAT FPT file.~~ **RESOLVED
+   2026-06-10:** CEAT.fpt received (`reference/CEAT.fpt`) — it is a live
+   CEA passthrough, not a table; for He-Xe it is exactly ideal monatomic
+   with M = 83.328 (w_He = 0.0181), replicated to machine precision by
+   `IdealGasFluid(M_molar = 83.328)`. See RESULTS.md.
 4. Confirmation of NPSS's FPT interpolation scheme (or just rely on Rung 0
-   pointwise comparison).
+   pointwise comparison). Less urgent: BRU3.mdl never interpolates a table
+   (CEAT computes live), so this only matters for future HeXe84.fpt runs.
 5. The FPT-generation Python (already wanted for roadmap item 4).
-6. If available: `solver.bad` diagnostic file (it is configured in the .mdl)
-   — gives the converged independent values even without ncpView output.
+6. ~~`solver.bad` diagnostic file.~~ **RESOLVED 2026-06-10:**
+   `reference/solver.bad` received — setup dump only (no converged values),
+   but it exposed the active constraint set and proved the as-dumped 5×5
+   system is structurally unsatisfiable (no turbine-PR independent), i.e.
+   it documents a failed mid-debug configuration. See RESULTS.md.
+7. (New) If the collaborator can rerun: a converged listing **with the
+   bleed actually flowing** and HPX units confirmed — the rung-2 replica
+   shows the historical comments correspond to a no-bleed, HPX-as-kW run.
 
 ## What is already runnable today (no NPSS artifacts)
 

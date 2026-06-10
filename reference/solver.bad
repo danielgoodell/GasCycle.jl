@@ -1,0 +1,115 @@
+
+--------------------------------------------------------------
+SETUP INFO FOR SOLVER 'solver'
+--------------------------------------------------------------
+
+Case No. = 0
+Parent assembly = 
+Solution mode = STEADY_STATE
+
+Operational limits:
+   max allowed solver iterations: maxIterations = 1000
+   max allowed model passes: maxPasses = 0
+   max allowed new Jacobians: maxJacobians = 1000
+   max allowed Broyden updates to a single Jacobian: maxBroydens = 50
+
+Matrix generation details:
+   criterion for regenerating a new Jacobian: regenNewJacobian = WHEN_NEEDED
+   carry over or calculate Jacobian between cases: firstNewJacobian = CARRY_OVER
+  upper limit on convergenceRatio for an iteration to be judged successfull: convergenceLimit = 1
+  lower limit on convergenceRatio below which a Broyden update will not be performed: broydenLimit = 0
+   max allowed number of consecutive unsuccessful 
+      iterations before a new Jacobian is needed: maxConvergeFailures =  3
+   upper limit on convergenceRatio allowed 
+      before immediately forcing a new Jacobian: divergenceLimit = 2
+
+Independent default attributes:
+   default perturbation type for matrix generation: defaultPerturbationType = FRACTIONAL
+   default perturbation value for Jacobian generation: defaultPerturbation = 0.001
+   default limit type for independent updates: defaultDxLimitType = FRACTIONAL
+   default limit value for independent updates: defaultDxLimit = 0.1
+   default tolerance type for update convergence tests: defaultToleranceType = FRACTIONAL
+   default tolerance value for update convergence tests: defaultTolerance = 0.0001
+   test independent variable updates for convergence: testXConvergenceStr : FALSE
+List of Active Independents: 
+   1  ind_HeatSource
+   2  HotStart.ind_Pt
+   3  HotStart.ind_Tt
+   4  Dow200Start.ind_Tt
+   5  Pump.ind_PRdes
+
+Dependent default attributes:
+   default tolerance type for error convergence tests: defaultToleranceType = FRACTIONAL
+   default tolerance value for error convergence tests: defaultTolerance = 0.0001
+List of Active Dependents:
+   1  Start.dep_Tt
+   2  Start.dep_Pt
+   3  HotStart.dep_Tt
+   4  HotStart.dep_Pt
+   5  Dow200Start.dep_Pt
+
+Constraint handling settings:
+   enable constraints: constraintHandlingOptStr :  TRUE
+   max number of error-projections on a single iteration: maxConstraintProjections = 3
+   when MIN and MAX constraints conflict, choose: resolveMinMaxConflict : MAX
+List of Inactive Dependents (including constraints) : NONE
+
+DSV (discontinuity handling) settings:
+   max discontinuous iterations: maxDisconIterations : 10
+   max free toggles: maxFreeToggles : 0
+List of DSVs : NONE
+
+
+--------------------------------------------------------------
+SETUP DETAILS FOR INDEPENDENTS IN SOLVER
+   'solver'
+--------------------------------------------------------------
+   *** Only attributes with values unique to each independent 
+   are listed here.***
+--------------------------------------------------------------
+
+1   ind_HeatSource
+   varName = HeatSourceHX.Tout
+
+2   HotStart.ind_Pt
+   varName = Pt
+
+3   HotStart.ind_Tt
+   varName = Tt
+
+4   Dow200Start.ind_Tt
+   varName = Tt
+
+5   Pump.ind_PRdes
+   varName = Pout
+
+
+--------------------------------------------------------------
+SETUP DETAILS FOR DEPENDENTS IN SOLVER
+   'solver'
+--------------------------------------------------------------
+   *** Only attributes with values unique to each dependent 
+   are listed here.***
+--------------------------------------------------------------
+
+1   Start.dep_Tt
+     eq_lhs Expression: Fl_I.Tt
+     eq_rhs Expression: Fl_O.Tt
+
+2   Start.dep_Pt
+     eq_lhs Expression: Fl_I.Pt
+     eq_rhs Expression: Fl_O.Pt
+
+3   HotStart.dep_Tt
+     eq_lhs Expression: Fl_I.Tt
+     eq_rhs Expression: Fl_O.Tt
+
+4   HotStart.dep_Pt
+     eq_lhs Expression: Fl_I.Pt
+     eq_rhs Expression: Fl_O.Pt
+
+5   Dow200Start.dep_Pt
+     eq_lhs Expression: Fl_I.Pt
+     eq_rhs Expression: Fl_O.Pt
+
+

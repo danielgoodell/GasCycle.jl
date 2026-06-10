@@ -70,3 +70,67 @@ the NPSS run listing to see what NPSS actually converges to, and ideally a
 no-bleed run of both models, and (b) the CEAT-vs-HeXe84 table at hot-end
 conditions — bounded small by the turbine isolation row but only directly
 checkable with the artifacts in PLAN.md.
+
+## 2026-06-10 — NPSS artifacts received: CEAT.fpt and solver.bad
+
+**CEAT.fpt is not a table.** It is a live passthrough: every property
+function sets an NPSS FlowStation (He weight fraction Wreac1 = 0.0181) and
+calls the CEA equilibrium package. Consequences:
+
+- CEA noble-gas thermo is exactly ideal monatomic (Cp = 2.5R, γ = 5/3, no
+  real-gas terms, no excitation below ~8000 K), so **CEAT is replicable to
+  machine precision** by `IdealGasFluid(M_molar = 83.328)`. No table file
+  needed after all.
+- w_He = 0.0181 ⇒ **M = 83.328 g/mol, not 83.8**: the NPSS model's fluid is
+  0.57 % off the BRU spec (and off HeXe84.fpt) in R and cp. Temperature
+  ratios are unaffected (γ exactly 5/3); powers and flows scale by it.
+
+**solver.bad is the diagnostic of a run that cannot converge.** Its active
+set is 5×5 — {HeatSourceHX.Tout, HotStart Tt, HotStart Pt, Dow200Start Tt,
+Pump Pout} vs {Start Tt+Pt closure, HotStart Tt+Pt closure, Dow200Start Pt
+closure} — with **no turbine-PR independent and no shaft-balance
+dependent**. With every PR fixed, the gas loop returns 23.798 psia against
+the required 23.700 (0.41 % error, 41× the 1e-4 tolerance) with no knob
+that can move it: structurally unsatisfiable. This matches the .mdl's
+mid-debug state. The successful run that produced the station comments must
+have had `Turb.ind_PRdes` active (declared in the .mdl): exact closure then
+gives PR_t = 1.7572 and turbine exit 24.66 psia ≈ the 24.69 comment.
+
+Confirmed picture of the successful NPSS solve (6×6): unknowns {TIT, PR_t,
+tear Tt, tear Pt, oil inlet Tt, pump Pout}; residuals {comp-inlet Tt and Pt
+closure, tear Tt and Pt closure, oil Pt closure, shaft balance vs HPX at
+36 krpm}. TIT, turbine PR, and the oil temperature are all *outputs*.
+
+## 2026-06-10 — Rung 2: full NPSS-equivalent replica (validation/bru3_replica.jl)
+
+CEAT-equivalent fluid, NPSS constraint set (triangular: PR_t analytic from
+pressure closure → TIT from shaft balance → oil Tt from cold-end closure).
+Four cases: {2 % bleed, no bleed} × {HPX = 13.42 kW, HPX = 13.42 hp}.
+
+**"No bleed + HPX as kW" matches every anchor simultaneously:**
+
+| quantity | replica | .mdl anchor |
+|---|---|---|
+| comp outlet | 737.58 °R / 45.03 psia | ≈737 / 45.03 |
+| turb inlet Pt | 43.33 psia | 43.2 |
+| turbine PR | 1.7572 | 1.75 (initial) |
+| tear (turb out) | 1686.5 °R / 24.66 psia | 1701 (initial) / 24.69 |
+| recup hot out | 785.0 °R | 786 |
+| oil inlet Tt | 526.0 °R | 527 (initial) |
+| heater Q | 33.75 kW | ~33.1 |
+| TIT (output!) | 2045.8 °R | 2060 design spec |
+
+The alternatives fail decisively: HPX-as-hp drives TIT to 1812–1837 °R and
+heater Q to ≤31 kW; with-bleed unbalances the recuperator (hot out 803 °R
+vs 786) and shifts heater Q to 35.5 kW.
+
+**Conclusions:**
+1. The successful NPSS run's interstage bleed moved no flow — precisely the
+   .mdl header's open issue ("look at Interstage Bleed Port"). The 1701 °R
+   tear and 786 °R station-8 comments are no-bleed values.
+2. HPX was effectively a kW quantity in that run (13.42 kW extraction).
+3. Residual gaps are now ~1 °R on temperatures and ~2 % on heater Q
+   (33.75 vs "33.1", a rounded comment), with TIT 2045.8 vs the 2060 spec —
+   i.e. the as-built NPSS model delivers its HPX load at 14 °R below the
+   BRU design TIT. Closing these last digits needs the actual NPSS output
+   listing (still the top artifact request) and CEA's exact constants.
