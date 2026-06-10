@@ -116,10 +116,20 @@ table precision. Each rung has a harness in `validation/`.
 
 ## NPSS-side artifacts needed (blocked on NPSS access / collaborator)
 
-1. Full design-point output listing of BRU3.mdl as-is (`ncpView` station
-   table: Tt, Pt, W, ht, s at stations 0–13; comp/turb `pwr`; HX Q's;
-   converged independents TIT/PR_t/Pt₆; solver tolerance used).
-   **Still the top request** — it pins the last ~1 °R / 2 % residuals.
+1. ~~Full design-point output listing of BRU3.mdl.~~ **LARGELY RESOLVED
+   2026-06-10:** `reference/BRU-ModelOutput-ParameterBookKeeping.xlsx`
+   contains a full Test-vs-NPSS station table from a converged run (TIT
+   pinned, bleed flowing, heater ΔP missing). Element semantics extracted
+   in RESULTS.md; the .mdl "anchors" turned out to be the test-data column.
+   Remaining sharp questions for the collaborator (single numbers each):
+   a. compressor η/semantics that produced 741.70 °R (0.784 isen /
+      0.809 poly; the .mdl's effDes = 0.80 matches neither),
+   b. NPSS HeatExchanger `effect` definition (run behaves as C_min-based
+      ε ≈ 0.941 despite effect = 0.95),
+   c. oil cp actually loaded (implied 2.82 kJ/(kg·K); sheet lists 1.8 and
+      0.884 BTU/(lbm·R); Oil.fpt has 0.8),
+   d. HPX units (kW-scale loss table supports kW; a run where the shaft
+      balance is active would settle it).
 2. The four `cout` lines from the isolation diagnostic section.
 3. ~~A rerun with `fs.comp = "HeXe84"` or the CEAT FPT file.~~ **RESOLVED
    2026-06-10:** CEAT.fpt received (`reference/CEAT.fpt`) — it is a live

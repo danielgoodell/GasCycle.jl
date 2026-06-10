@@ -134,3 +134,61 @@ vs 786) and shifts heater Q to 35.5 kW.
    i.e. the as-built NPSS model delivers its HPX load at 14 °R below the
    BRU design TIT. Closing these last digits needs the actual NPSS output
    listing (still the top artifact request) and CEA's exact constants.
+
+**⚠ Correction (later the same day, after the spreadsheet arrived):** the
+.mdl comment values (737 / 1701 / 786 / 45.03 / 24.69) are the **Test
+Data** column of BRU-ModelOutput-ParameterBookKeeping.xlsx — i.e. NASA
+TN D-5815 design/test values, *not* NPSS outputs. The table above therefore
+shows the replica matching the test/design data (which is self-consistent
+with isentropic 0.80/0.87, no bleed, PR ≈ 1.75 — hence the clean sweep),
+and conclusions 1–2 describe that data's provenance rather than an NPSS
+run. The actual NPSS output is analyzed in the next section.
+
+## 2026-06-10 — Excel received: first true NPSS output column (rung 2 proper)
+
+`reference/BRU-ModelOutput-ParameterBookKeeping.xlsx` holds a full
+station-by-station **Test Data vs NPSS** comparison (with the collaborator's
+diff formulas flagging stations 4, 6/7, 12) plus a parasitic-loss table
+(236 + 650 + 179 + 95 + 665 = 1825 W — kW-scale quantities, consistent
+with HPX-as-kW) and an oil-Cp bookkeeping note.
+
+Forensics on the NPSS column (`validation/bru3_excel_run.jl`):
+
+- TIT pinned at 2060 °R (no shaft balance in play), bleed flowing
+  (0.03 lb/s = 2.27 % at 540 °R — not heated to 559 °R), **heater ΔP = 0**
+  (st 4→5 pressure unchanged ⇒ turbine PR = 1.8285, not 1.75), sink
+  gas-side dPqP = 0.005 (not the .mdl's 0.0173), and the HotStart tear
+  destroys 0.04 lb/s (st6 W = 1.32 → st7 W = 1.28).
+
+Element-by-element replication at the exact NPSS port states:
+
+| element | GasCycle (best match) | NPSS | Δ |
+|---|---|---|---|
+| Turbine | **polytropic η = 0.87**: 1642.04 °R | 1642.07 | **−0.03 °R** |
+| HeatSinkHx gas out | ε-NTU, C_min = gas: 540.08 °R | 540.00 | +0.08 °R |
+| Compressor | isen 0.784 → 741.61; poly 0.809 → 741.33 | 741.70 | η ≠ 0.80 under either semantics |
+| Recup cold out | ε = 0.95: 1590.40 °R | 1580.02 | implied ε ≈ 0.938–0.941 |
+
+So: the NPSS turbine is **polytropic** (matched at solver precision); the
+test/design column is what's isentropic-consistent. The earlier README
+inference ("NPSS effDes is isentropic") came from matching the 737 anchor —
+which is test data. Open items now have sharp, single-number questions:
+
+1. Compressor: what η/semantics produced 741.70 °R? (0.784 isen / 0.809
+   poly; the .mdl says effDes = 0.80 — possibly 0.81 polytropic in that run)
+2. Recuperator: what is NPSS HeatExchanger's `effect` definition? The run
+   behaves as C_min-based ε ≈ 0.941 despite `effect = 0.95`.
+3. Oil cp actually used: implied 0.674 BTU/(lbm·R) = 2.82 kJ/(kg·K); the
+   sheet lists 1.8 ("current"), 0.884 ("correct" Dow 200), and Oil.fpt has
+   0.8 — none match. (Gas loop unaffected: oil inlet Tt floated to close.)
+4. HPX units: still open — this run pinned TIT, so the shaft balance never
+   acted. The loss table supports kW.
+
+The spreadsheet's flagged Test-vs-NPSS discrepancies fully decompose:
+station 6/7 Δ = 58.9 °R = 24.9 (PR 1.8285 from missing heater ΔP)
++ 28.1 (bleed dilution) + 5.5 (residual semantics/η); station 4's 73 °R is
+the recuperator amplifying station 7 (0.95 × 59 ≈ 56) plus comp-outlet and
+flow-bookkeeping effects; station 12's 14.4 °R is the oil-cp issue.
+**In other words: the collaborator's flagged discrepancies are not
+mysteries — they are the .mdl's own known issues (bleed port, missing
+heater ΔP, oil cp), now quantified individually.**

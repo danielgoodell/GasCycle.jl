@@ -80,7 +80,9 @@ T_bleed_out = R_to_K(559.0)          # BRU3.mdl: Bld.setTotalTP(459+100, Bld.Pt)
 # ── Build network ───────────────────────────────────────────────────────────────
 net = FlowNetwork()
 
-# η_type=:isentropic matches NPSS effDes semantics (BRU3.mdl)
+# η_type=:isentropic matches the TN D-5815 design/test station values (the
+# reference column of this comparison); the as-run NPSS model behaved
+# polytropically — see validation/RESULTS.md.
 comp    = Compressor("Comp";   PR=PR_comp,   η_poly=η_comp, η_type=:isentropic)
 bsplit  = Splitter("BldSplit"; fracs=[1.0 - frac_bleed, frac_bleed])
 recup   = HeatExchanger("Recup"; ε=ε_recup,
@@ -171,12 +173,13 @@ println("BRU design goal:            10.5 kW")
 println("BRU test result (at 45 psia / 2060°R TIT):  ~13.6 kW (lab loop, low P-loss)")
 println()
 println("\nFluid model note:")
-println("  NPSS BRU3.mdl uses 'CEAT' composition via CEA thermodynamics.")
-println("  GasCycle uses HeXe84.fpt which gives slightly different Cp/γ at low T.")
-println("  GasCycle uses true polytropic efficiency (20-step integration); NPSS BRU3.mdl")
-println("  appears to use isentropic-efficiency semantics with the same η=0.80 value,")
-println("  which for He-Xe at PR=1.9 accounts for most of the ~13 K comp outlet offset.")
-println("  The remainder is FPT interpolation differences. Net power agrees to ~1.5%.")
+println("  NPSS BRU3.mdl uses 'CEAT' = live CEA thermodynamics, exactly ideal")
+println("  monatomic He-Xe with M = 83.328 (w_He = 0.0181) — see validation/RESULTS.md.")
+println("  GasCycle here uses HeXe84.fpt (M = 83.8) with isentropic efficiencies,")
+println("  which is the convention the TN D-5815 design/test station values follow.")
+println("  The as-run NPSS model's turbine behaved polytropically (matched to 0.03 °R")
+println("  in validation/bru3_excel_run.jl); its station diffs vs test data decompose")
+println("  into known .mdl issues (bleed port, missing heater dP, oil cp).")
 println()
 println("Lab-loop note:")
 println("  Test results exceeded design by ~30% due to lower pressure losses (3% vs 8%)")
