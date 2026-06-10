@@ -54,8 +54,29 @@ Fix (NPSS-style formulation):
   self-sustain threshold near 1330 °R).
 
 ### 4. Direct He-Xe property module  ← NEXT
-Replace the FPT-table dependency with a native `HeXeFluid(x_He)` backend
-built from the collaborator's FPT-generation source code (to be obtained).
+Replace the FPT-table dependency with a native `HeXeFluid(x_He)` backend.
+Method papers are in `reference/` (added 2026-06-09) and are sufficient to
+implement directly; the collaborator's Python is useful for cross-checking
+but not blocking:
+
+- **Johnson, NASA/CR-2006-214394** — dilute transport (μ, k): Hirschfelder
+  first-order binary Chapman-Enskog with LJ parameters (He σ=2.576 Å,
+  ε/k=10.22 K; Xe σ=4.055 Å, ε/k=229 K), Ω(2,2)*/A*/B* tables, Singh
+  third-order conductivity correction. Tables 4–6 are an exact test oracle
+  (μ and k at M = 20.183/39.94/83.8, 400–1200 K); Table 7 has Prandtl data.
+- **Tournier/El-Genk/Gallo, AIAA 2006-4154** — real-gas thermo + dense
+  transport: virial EOS Z = 1 + Bρ̂ + Cρ̂² with corresponding-states
+  correlations for B(θ), C(θ) and He-specific B (Eqs. 8–11), mixture
+  combining rules (Eqs. 16–22), enthalpy/Cp/Cv from B(T), C(T) derivatives
+  (Eqs. 12–15), dilute-mixture μ/k via Sutherland-Wassiljewa with
+  tabulated coefficients (Eqs. 30–32, 36, Tables 1–3), dense-gas excess
+  corrections Ψμ(ρr), Ψλ(ρr) (Eqs. 4, 23–28, 33). This matches the
+  real-gas behavior observed in HeXe84.fpt.
+
+Validation oracles: Johnson Tables 4–7, El-Genk spot values (e.g. Xe at
+2 MPa/400 K: Cp +10.7%, γ=1.786), HeXe84.fpt itself, and Taylor-1988
+experimental Prandtl numbers.
+
 Decided 2026-06-09, superseding the earlier "FPT AD" item — rationale:
 
 - Checked HeXe84.fpt against ideal monatomic gas: within ~0.5% at cycle
