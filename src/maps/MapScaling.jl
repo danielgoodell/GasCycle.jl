@@ -17,7 +17,8 @@ function scale_map(base::PerformanceMap;
                    PR_des::Float64,
                    eta_des::Float64,
                    Nc_ref::Float64 = base.Nc_axis[end ÷ 2 + 1],
-                   Wc_ref::Float64 = base.Wc_axis[end ÷ 2 + 1])
+                   Wc_ref::Float64 = base.Wc_axis[end ÷ 2 + 1],
+                   bounds::Symbol = base.bounds)
 
     PR_ref, eta_ref = query(base, Nc_ref, Wc_ref)
 
@@ -31,5 +32,5 @@ function scale_map(base::PerformanceMap;
     PR_new  = 1.0 .+ (base.PR_grid  .- 1.0) .* s_PR
     eta_new = base.eta_grid .* s_eta
 
-    PerformanceMap(Nc_new, Wc_new, PR_new, eta_new)
+    PerformanceMap(Nc_new, Wc_new, PR_new, eta_new; bounds=bounds)
 end

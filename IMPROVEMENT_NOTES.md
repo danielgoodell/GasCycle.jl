@@ -45,6 +45,11 @@ This is the most likely place for future speed and readability gains.
 
 ## 3. Introduce an Element Port Interface
 
+Status: implemented as a private network-port interface in `FlowNetwork.jl`.
+The central traversal now asks each element for required inlets, outlet ports,
+inlet aliases, outlet values, and its network compute hook instead of branching
+on each special element type in `_compute_element!`.
+
 `FlowNetwork` currently knows too much about `HeatExchanger`, `Splitter`, and
 `Mixer` internals. Prefer element-local methods such as:
 
@@ -61,6 +66,10 @@ logic.
 
 ## 4. Split `Solver.jl`
 
+Status: implemented. `Solver.jl` is now the public coordinator and includes
+focused files for result handling, residual assembly, design solve,
+off-design solve, and cycle metrics.
+
 `Solver.jl` currently handles independent-variable collection, residual
 assembly, design solving, off-design solving, result display, and cycle metrics.
 Consider splitting it into smaller files:
@@ -72,6 +81,10 @@ Consider splitting it into smaller files:
 - `CycleMetrics.jl`
 
 ## 5. Make Map Bounds Behavior Explicit
+
+Status: implemented. `PerformanceMap` now accepts `bounds=:error` by default,
+with `:warn` and `:clamp` available for intentional clamping. Scaled maps
+inherit the base map bounds policy unless overridden.
 
 `FPTFluid` now has explicit bounds behavior, but `PerformanceMap.query` still
 silently clamps corrected speed and corrected flow. Consider the same style:

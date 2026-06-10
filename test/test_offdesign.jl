@@ -28,6 +28,30 @@ function synthetic_base_maps()
     (cbase, tbase)
 end
 
+@testset "PerformanceMap bounds policy" begin
+    Nc_ax = [1.0, 2.0]
+    Wc_ax = [10.0, 20.0]
+    PR = [2.0 2.5; 3.0 3.5]
+    η = [0.80 0.81; 0.82 0.83]
+
+    strict = PerformanceMap(Nc_ax, Wc_ax, PR, η)
+    @test query(strict, 1.5, 15.0) == (2.75, 0.815)
+    @test_throws DomainError query(strict, 0.9, 15.0)
+    @test_throws DomainError query(strict, 1.5, 21.0)
+    @test_throws ErrorException PerformanceMap(Nc_ax, Wc_ax, PR, η; bounds=:bad)
+
+    clamping = PerformanceMap(Nc_ax, Wc_ax, PR, η; bounds=:clamp)
+    @test query(clamping, 0.9, 15.0) == query(clamping, 1.0, 15.0)
+
+    warning = PerformanceMap(Nc_ax, Wc_ax, PR, η; bounds=:warn)
+    @test_warn "outside map bounds" query(warning, 2.1, 15.0)
+
+    scaled = scale_map(clamping; Nc_des=3.0, Wc_des=30.0, PR_des=4.0, eta_des=0.9,
+                       Nc_ref=1.5, Wc_ref=15.0)
+    @test scaled.bounds == :clamp
+    @test query(scaled, 1.0, 30.0) == query(scaled, scaled.Nc_axis[1], 30.0)
+end
+
 @testset "Off-design map operation" begin
     fluid = IdealGasFluid(M_molar = 83.8)   # HeXe84
 

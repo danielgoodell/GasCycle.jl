@@ -68,48 +68,94 @@ function _el_idx(net::FlowNetwork, el::AbstractElement)
     idx
 end
 
-# ── Port helpers ──────────────────────────────────────────────────────────────
+# ── Element network-port interface ───────────────────────────────────────────
+
+_mixer_inlet_port(i::Int) = i == 1 ? :inlet :
+                            i == 2 ? :bleed_inlet : Symbol("inlet_$i")
+_splitter_outlet_port(i::Int) = i == 1 ? :outlet :
+                                i == 2 ? :bleed_outlet : Symbol("outlet_$i")
+
+"""Inlet port names that must be satisfied before element can be computed."""
+network_required_inlets(::AbstractElement)::Vector{Symbol} = [:inlet]
+network_required_inlets(::HeatExchanger)::Vector{Symbol} = [:cold_inlet, :hot_inlet]
+network_required_inlets(el::Mixer)::Vector{Symbol} =
+    [_mixer_inlet_port(i) for i in 1:el.n_inlets]
+
+"""Outlet port names produced after a network compute."""
+network_outlets(::AbstractElement)::Vector{Symbol} = [:outlet]
+network_outlets(::HeatExchanger)::Vector{Symbol} = [:cold_outlet, :hot_outlet, :outlet]
+network_outlets(el::Splitter)::Vector{Symbol} =
+    [_splitter_outlet_port(i) for i in eachindex(el.outlets)]
+
+"""Additional inlet aliases that become available when `port` is written."""
+network_inlet_aliases(::AbstractElement, port::Symbol) = (port,)
+network_inlet_aliases(::HeatExchanger, port::Symbol) =
+    port == :inlet ? (:inlet, :cold_inlet) : (port,)
 
 """Return the Port currently stored on an outlet port, or nothing."""
-function _get_outlet(el::AbstractElement, port::Symbol)
-    port == :outlet     && return hasproperty(el, :outlet)      ? el.outlet      :
-                                  (el isa HeatExchanger         ? el.cold_outlet : nothing)
-    port == :cold_outlet && el isa HeatExchanger && return el.cold_outlet
-    port == :hot_outlet  && el isa HeatExchanger && return el.hot_outlet
-    if el isa Splitter
-        port == :bleed_outlet && length(el.outlets) >= 2 && return el.outlets[2]
-        m = match(r"^outlet_(\d+)$", string(port))
-        !isnothing(m) && return el.outlets[parse(Int, m.captures[1])]
-    end
+function network_get_outlet(el::AbstractElement, port::Symbol)
+    port == :outlet && hasproperty(el, :outlet) && return getproperty(el, :outlet)
     nothing
 end
 
-"""Set an inlet port on an element."""
-function _set_inlet!(el::AbstractElement, port::Symbol, p::Port)
-    if port == :inlet
-        if el isa HeatExchanger;  el.cold_inlet = p
-        elseif el isa Mixer;      el.inlets[1]  = p
-        else;                     el.inlet       = p
-        end
-    elseif port == :cold_inlet  && el isa HeatExchanger; el.cold_inlet = p
-    elseif port == :hot_inlet   && el isa HeatExchanger; el.hot_inlet  = p
-    elseif port == :bleed_inlet && el isa Mixer;         el.inlets[2]  = p
+function network_get_outlet(el::HeatExchanger, port::Symbol)
+    port == :outlet      && return el.cold_outlet
+    port == :cold_outlet && return el.cold_outlet
+    port == :hot_outlet  && return el.hot_outlet
+    nothing
+end
+
+function network_get_outlet(el::Splitter, port::Symbol)
+    idx = if port == :outlet
+        1
+    elseif port == :bleed_outlet
+        2
     else
-        m = match(r"^inlet_(\d+)$", string(port))
-        !isnothing(m) && el isa Mixer && (el.inlets[parse(Int, m.captures[1])] = p; return)
+        m = match(r"^outlet_(\d+)$", string(port))
+        isnothing(m) ? 0 : parse(Int, m.captures[1])
+    end
+    1 <= idx <= length(el.outlets) ? el.outlets[idx] : nothing
+end
+
+"""Set an inlet port on an element."""
+function network_set_inlet!(el::AbstractElement, port::Symbol, p::Port)
+    port == :inlet && hasproperty(el, :inlet) && (setproperty!(el, :inlet, p); return)
+    error("Unknown inlet port :$port on element \"$(el.name)\"")
+end
+
+function network_set_inlet!(el::HeatExchanger, port::Symbol, p::Port)
+    if port == :inlet || port == :cold_inlet
+        el.cold_inlet = p
+    elseif port == :hot_inlet
+        el.hot_inlet = p
+    else
         error("Unknown inlet port :$port on element \"$(el.name)\"")
     end
 end
 
-"""Return the stored value of an inlet port, or nothing."""
-function _get_stored_inlet(el::AbstractElement, port::Symbol)
-    port == :inlet      && return hasproperty(el, :inlet) ? el.inlet :
-                                  (el isa HeatExchanger   ? el.cold_inlet : nothing)
-    port == :cold_inlet && el isa HeatExchanger && return el.cold_inlet
-    port == :hot_inlet  && el isa HeatExchanger && return el.hot_inlet
-    port == :bleed_inlet && el isa Mixer && length(el.inlets) >= 2 && return el.inlets[2]
-    nothing
+function network_set_inlet!(el::Mixer, port::Symbol, p::Port)
+    idx = if port == :inlet
+        1
+    elseif port == :bleed_inlet
+        2
+    else
+        m = match(r"^inlet_(\d+)$", string(port))
+        isnothing(m) ? 0 : parse(Int, m.captures[1])
+    end
+    1 <= idx <= el.n_inlets || error("Unknown inlet port :$port on element \"$(el.name)\"")
+    el.inlets[idx] = p
 end
+
+"""Compute an element once its network inlets have already been written."""
+function network_compute!(el::AbstractElement)
+    hasproperty(el, :inlet) || error("Element \"$(el.name)\" has no default :inlet")
+    compute!(el, getproperty(el, :inlet))
+end
+
+network_compute!(el::HeatExchanger) = compute_hx!(el)
+network_compute!(el::Mixer) = compute!(el)
+
+_get_outlet(el::AbstractElement, port::Symbol) = network_get_outlet(el, port)
 
 function _strip_to_type(x, ::Type{T}) where T
     x isa T && return x
@@ -120,15 +166,6 @@ end
 # ── Compute one element and store its outlets in avail ────────────────────────
 
 const _AvailMap = Dict{Tuple{Int,Symbol}, Any}
-
-"""Inlet port names that must be satisfied before element can be computed."""
-function _required_inlets(el::AbstractElement)::Vector{Symbol}
-    el isa HeatExchanger && return [:cold_inlet, :hot_inlet]
-    el isa Mixer         && return [i == 1 ? :inlet :
-                                    i == 2 ? :bleed_inlet : Symbol("inlet_$i")
-                                    for i in 1:el.n_inlets]
-    [:inlet]
-end
 
 function _compile_plan(net::FlowNetwork)
     forward_edges_by_src = [PortEdge[] for _ in eachindex(net.elements)]
@@ -141,7 +178,7 @@ function _compile_plan(net::FlowNetwork)
         end
     end
 
-    required_inlets = [_required_inlets(el) for el in net.elements]
+    required_inlets = [network_required_inlets(el) for el in net.elements]
     _FlowPlan(forward_edges_by_src, back_edges, required_inlets,
               length(net.elements), length(net.edges))
 end
@@ -159,11 +196,8 @@ end
 
 function _store_available!(avail::_AvailMap, net::FlowNetwork,
                            el_idx::Int, port::Symbol, p::Port)
-    avail[(el_idx, port)] = p
-
-    # Keep the serial-chain `:inlet` alias for a heat exchanger's cold side.
-    if port == :inlet && net.elements[el_idx] isa HeatExchanger
-        avail[(el_idx, :cold_inlet)] = p
+    for alias in network_inlet_aliases(net.elements[el_idx], port)
+        avail[(el_idx, alias)] = p
     end
 end
 
@@ -200,37 +234,15 @@ end
 
 function _compute_element!(net::FlowNetwork, el_idx::Int, avail::_AvailMap)
     el = net.elements[el_idx]
+    for port in network_required_inlets(el)
+        network_set_inlet!(el, port, avail[(el_idx, port)])
+    end
 
-    if el isa HeatExchanger
-        el.cold_inlet = avail[(el_idx, :cold_inlet)]
-        el.hot_inlet  = avail[(el_idx, :hot_inlet)]
-        compute_hx!(el)
-        avail[(el_idx, :cold_outlet)] = el.cold_outlet
-        avail[(el_idx, :hot_outlet)]  = el.hot_outlet
-        avail[(el_idx, :outlet)]      = el.cold_outlet   # alias for serial chain
+    network_compute!(el)
 
-    elseif el isa Mixer
-        for i in 1:el.n_inlets
-            p = i == 1 ? :inlet : (i == 2 ? :bleed_inlet : Symbol("inlet_$i"))
-            el.inlets[i] = avail[(el_idx, p)]
-        end
-        compute!(el)
-        avail[(el_idx, :outlet)] = el.outlet
-
-    elseif el isa Splitter
-        compute!(el, avail[(el_idx, :inlet)])
-        avail[(el_idx, :outlet)] = el.outlets[1]
-        if length(el.outlets) >= 2
-            avail[(el_idx, :bleed_outlet)] = el.outlets[2]
-        end
-        for i in 3:length(el.outlets)
-            avail[(el_idx, Symbol("outlet_$i"))] = el.outlets[i]
-        end
-
-    else
-        inlet = avail[(el_idx, :inlet)]
-        out   = compute!(el, inlet)
-        avail[(el_idx, :outlet)] = out
+    for port in network_outlets(el)
+        out = network_get_outlet(el, port)
+        isnothing(out) || (avail[(el_idx, port)] = out)
     end
 end
 
