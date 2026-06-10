@@ -42,17 +42,18 @@ Fix (NPSS-style formulation):
 - `pressure_ratio(::Turbine)`/`(::Compressor)` accessors added and used by
   all four examples (fixes stale PR in simple_brayton and bru_tit_sweep).
 
-### 3. Off-design TIT sweep validation (plan Phase 7)  ← NEXT
-Once item 1 is in, build the turbine-inlet-temperature sweep (100% → 60% of
-design) with scaled maps on the BRU cycle: confirm shaft power balance holds
-and the maps track. This is the test that proves off-design capability is real.
+### 3. Off-design TIT sweep validation (plan Phase 7)  ✅ DONE (a661a48)
+- Back-edge (Tt, Pt) states folded into the off-design Newton vector
+  (replacing stale fixed-point seeding); unknowns normalized (raw scaling
+  gave cond(J) ~1e6); TrustRegion for robustness across map-cell kinks.
+- `Shaft` gained `P_load` (generator extraction) for the off-design power
+  balance.
+- Closed-loop BRU-like design-point reproduction + constant-speed TIT sweep
+  tests; `examples/bru_tit_sweep_offdesign.jl` sweeps the FPT-fluid BRU
+  cycle 2060→1236 °R at 36 krpm (21/21 converged, design power reproduced,
+  self-sustain threshold near 1330 °R).
 
-Known issue to watch: in off-design mode the solver handles closed-loop
-back-edges by legacy fixed-point seeding inside `one_pass!` (stale state
-between Newton iterations). For closed loops this may need the back-edge
-states folded into the outer Newton vector.
-
-### 4. FPT AD via implicit-function rule
+### 4. FPT AD via implicit-function rule  ← NEXT
 `T_from_h` / `T_from_s` in FPTFluid use bisection that drops Dual derivatives,
 so AD currently only fully works with the ideal-gas backend. Add a custom
 ForwardDiff rule (implicit function theorem: dT = dh / cp etc.) so
