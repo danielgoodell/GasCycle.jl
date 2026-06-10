@@ -53,11 +53,21 @@ Fix (NPSS-style formulation):
   cycle 2060→1236 °R at 36 krpm (21/21 converged, design power reproduced,
   self-sustain threshold near 1330 °R).
 
-### 4. Direct He-Xe property module  ← NEXT
-Replace the FPT-table dependency with a native `HeXeFluid(x_He)` backend.
+### 4. Direct noble-gas property module  ← NEXT (waiting on collaborator's Python)
+Replace the FPT-table dependency with a native property backend. ON HOLD
+(2026-06-09) until Daniel obtains the collaborator's FPT-generation Python —
+plan is to three-way compare code vs. papers vs. FPT output and resolve any
+discrepancies before implementing.
+
+Design note: implement as a general `NobleGasMixture(gas1, gas2, x1)`, not
+hard-coded He-Xe. The El-Genk paper's correlations cover all 5 noble gases
+(He, Ne, Ar, Kr, Xe) and their 10 binary mixtures with per-gas constants in
+its Table 1 — so Ar and Kr (the cheap stand-in test gases for He-Xe systems,
+including He-Ar and He-Kr mixtures) come for free from the same
+implementation.
+
 Method papers are in `reference/` (added 2026-06-09) and are sufficient to
-implement directly; the collaborator's Python is useful for cross-checking
-but not blocking:
+implement directly; the collaborator's Python adds cross-checking:
 
 - **Johnson, NASA/CR-2006-214394** — dilute transport (μ, k): Hirschfelder
   first-order binary Chapman-Enskog with LJ parameters (He σ=2.576 Å,
@@ -94,6 +104,20 @@ Decided 2026-06-09, superseding the earlier "FPT AD" item — rationale:
 
 Keep the FPT reader regardless: reading the literal file the collaborator
 feeds NPSS is the cleanest apples-to-apples cross-validation available.
+
+### 5. Additional working fluids: air, N₂, CO₂
+Real systems are commonly first tested with cheap fluids: air (low-temp
+checkout, motoring), N₂, or CO₂, before committing the expensive xenon
+inventory. Ar/Kr are covered by item 4; air/N₂/CO₂ are di-/triatomic with
+temperature-dependent Cp, so monatomic kinetic theory does not apply.
+Implement a `ThermallyPerfectGas` backend:
+- Cp(T) from NASA 7- or 9-coefficient polynomials (h, s by closed-form
+  integration — keeps AD support exact like IdealGasFluid).
+- Ideal-gas EOS is adequate for checkout/motoring conditions; revisit only
+  if someone needs sCO₂-style operation near the CO₂ critical point.
+- Transport via Sutherland law or polynomial fits per gas.
+- Air as a fixed-composition pseudo-species (standard dry air), N₂ and CO₂
+  as pure species.
 
 ### Backlog (lower priority)
 - **FPT AD via implicit-function rule** (deferred with trigger): dT = dh/cp
