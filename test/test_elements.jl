@@ -1,6 +1,19 @@
 using Test
 using GasCycle
-import GasCycle: cp
+import GasCycle: cp, enthalpy, entropy, density, gamma, T_from_h
+
+struct LinearCpFluid <: FluidProperties
+    cp0::Float64
+    a::Float64
+end
+
+cp(fp::LinearCpFluid, T, P) = fp.cp0 + fp.a * T
+enthalpy(fp::LinearCpFluid, T, P) = fp.cp0 * T + 0.5 * fp.a * T^2
+entropy(fp::LinearCpFluid, T, P) = fp.cp0 * log(T / 298.15) + fp.a * (T - 298.15)
+density(fp::LinearCpFluid, T, P) = P / (250.0 * T)
+gamma(fp::LinearCpFluid, T, P) = cp(fp, T, P) / (cp(fp, T, P) - 250.0)
+T_from_h(fp::LinearCpFluid, h_target, P; T_guess=500.0) =
+    (-fp.cp0 + sqrt(fp.cp0^2 + 2 * fp.a * h_target)) / fp.a
 
 # Shared ideal-gas fluid for all element tests
 const FL = HeXeIdealGas(0.47)
@@ -118,6 +131,36 @@ end
     @test Q_transferred(hx) ≈ ε * Q_max  rtol=1e-3
 end
 
+@testset "HeatExchanger variable-cp energy balance" begin
+    fl = LinearCpFluid(900.0, 0.5)
+    ε = 0.75
+    hx = HeatExchanger("VarCpHX"; ε=ε, dPqP_hot=0.0, dPqP_cold=0.0)
+
+    hot_state = FluidState(P0 * 2.0, 1000.0, 2.0, fl)
+    cold_state = FluidState(P0, 300.0, 1.0, fl)
+
+    hx.hot_inlet = Port(hot_state)
+    hx.cold_inlet = Port(cold_state)
+
+    hot_out, cold_out = compute_hx!(hx)
+
+    Q_hot = hot_state.W * (enthalpy(hot_state) - enthalpy(hot_out[]))
+    Q_cold = cold_state.W * (enthalpy(cold_out[]) - enthalpy(cold_state))
+
+    Q_hot_limit = hot_state.W * (
+        enthalpy(fl, hot_state.Tt, hot_state.Pt) -
+        enthalpy(fl, cold_state.Tt, hot_state.Pt)
+    )
+    Q_cold_limit = cold_state.W * (
+        enthalpy(fl, hot_state.Tt, cold_state.Pt) -
+        enthalpy(fl, cold_state.Tt, cold_state.Pt)
+    )
+
+    @test Q_hot ≈ Q_cold rtol=1e-10
+    @test Q_hot ≈ ε * min(Q_hot_limit, Q_cold_limit) rtol=1e-10
+    @test Q_transferred(hx) ≈ Q_hot rtol=1e-10
+end
+
 @testset "Splitter" begin
     sp = Splitter("Sp"; fracs=[0.98, 0.02])
     out_main = compute!(sp, make_port())
@@ -163,6 +206,12 @@ end
 
     @test n_residuals(mx) == 0
     @test length(indep_vars(mx)) == 0
+
+    other_fluid = IdealGasFluid(M_molar = 83.8)
+    bad = Mixer("BadMix")
+    bad.inlets[1] = Port(s1)
+    bad.inlets[2] = Port(FluidState(P0, 500.0, W0 * 0.2, other_fluid))
+    @test_throws ErrorException compute!(bad)
 end
 
 @testset "Shaft power balance" begin
@@ -183,6 +232,69 @@ end
     # power_balance returns a scalar (not necessarily zero for arbitrary PRs)
     pb = power_balance(sh)
     @test pb isa Float64
+end
+
+@testset "Back-edge seeds preserve branch mass flow" begin
+    W_seed = 10.0
+    main_frac = 0.70
+    P1, T1 = 200e3, 350.0
+
+    comp  = Compressor("Comp"; PR=1.8, η_poly=0.84)
+    split = Splitter("Split"; fracs=[main_frac, 1 - main_frac])
+    recup = HeatExchanger("Recup"; ε=0.80, dPqP_hot=0.02, dPqP_cold=0.01)
+    heat  = HeatSource("Heat"; TtExit=1000.0, dPqP=0.02)
+    turb  = Turbine("Turb"; mode=:pressure_closure, P_exit=P1 / (1 - 0.02),
+                    η_poly=0.88)
+    bleed = Duct("Bleed"; dPqP=0.01)
+
+    net = FlowNetwork()
+    add!(net, comp, split, recup, heat, turb, bleed)
+    connect!(net, comp => split => recup => heat => turb => comp)
+    connect_port!(net, split, :bleed_outlet, bleed, :inlet)
+    add_hx_pair!(net, recup; hot=turb)
+    set_state!(net, comp; Pt=P1, Tt=T1, W=W_seed, fluid=FL)
+
+    sol = solve!(net)
+
+    @test sol.status == :success
+    @test recup.hot_inlet[].W ≈ W_seed * main_frac rtol=1e-12
+    @test turb.outlet[].W ≈ W_seed * main_frac rtol=1e-12
+end
+
+@testset "FlowNetwork errors on unprocessed elements" begin
+    comp = Compressor("Comp"; PR=1.8, η_poly=0.84)
+    orphan = Duct("Orphan"; dPqP=0.01)
+
+    net = FlowNetwork()
+    add!(net, comp, orphan)
+    set_state!(net, comp; Pt=P0, Tt=T0, W=W0, fluid=FL)
+
+    err = try
+        solve!(net)
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("unprocessed elements", err.msg)
+    @test occursin("Orphan", err.msg)
+    @test occursin(":inlet", err.msg)
+
+    split = Splitter("Split"; fracs=[0.7, 0.3])
+    mix = Mixer("Mix")
+
+    net2 = FlowNetwork()
+    add!(net2, split, mix)
+    connect!(net2, split => mix)
+    set_state!(net2, split; Pt=P0, Tt=T0, W=W0, fluid=FL)
+
+    err2 = try
+        solve!(net2)
+    catch e
+        e
+    end
+    @test err2 isa ErrorException
+    @test occursin("Mix", err2.msg)
+    @test occursin(":bleed_inlet", err2.msg)
 end
 
 @testset "ForwardDiff: net power gradient" begin
@@ -222,4 +334,30 @@ end
     h = 1e-4
     fd1 = (cycle_power([x0[1]+h*x0[1], x0[2]]) - cycle_power([x0[1]-h*x0[1], x0[2]])) / (2h*x0[1])
     @test ∇W[1] ≈ fd1  rtol=1e-4
+end
+
+@testset "ForwardDiff: cycle efficiency uses solved heat input" begin
+    using ForwardDiff
+
+    fluid = HeXeIdealGas(0.47)
+
+    function cycle_eta(PR)
+        net  = FlowNetwork()
+        comp = Compressor("C"; PR=PR, η_poly=0.88)
+        heat = HeatSource("H"; TtExit=1100.0, dPqP=0.02, mode=:fixed_TtExit)
+        turb = Turbine("T"; PR=2.0, η_poly=0.90)
+
+        add!(net, comp, heat, turb)
+        connect!(net, comp => heat => turb)
+        set_state!(net, comp; Pt=500e3, Tt=400.0, W=10.0, fluid=fluid)
+
+        cycle_efficiency(solve!(net))
+    end
+
+    η_plain = cycle_eta(2.5)
+    η_dual  = cycle_eta(ForwardDiff.Dual{Nothing}(2.5, 1.0))
+
+    @test η_plain > 0.0
+    @test ForwardDiff.value(η_dual) ≈ η_plain rtol=1e-12
+    @test isfinite(ForwardDiff.partials(η_dual, 1))
 end

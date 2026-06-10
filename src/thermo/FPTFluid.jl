@@ -50,6 +50,7 @@ const _LBM_FT3_TO_KG_M3  = 16.01846          # lbm/ft³ → kg/m³
 # ── Main struct ───────────────────────────────────────────────────────────────
 struct FPTFluid <: FluidProperties
     name::String
+    bounds::Symbol  # :error, :warn, or :clamp for out-of-table T/P lookups
     itp_h::Any      # h(Pt, Tt)  [J/kg]
     itp_s::Any      # s(Pt, Tt)  [J/(kg·K)]
     itp_cp::Any     # cp(Pt, Tt) [J/(kg·K)]
@@ -210,11 +211,19 @@ function _build_itp(Pt_vals, inner_arr, out_arr,
 end
 
 """
-    FPTFluid(path) -> FPTFluid
+    FPTFluid(path; bounds=:error) -> FPTFluid
 
 Load a fluid property table from an NPSS FPT file.
+
+`bounds` controls property lookups outside the table domain:
+- `:error` throws an informative error immediately (default)
+- `:warn` clamps to the table bounds and warns
+- `:clamp` clamps silently, matching the legacy behavior
 """
-function FPTFluid(path::String)
+function FPTFluid(path::String; bounds::Symbol = :error)
+    bounds in (:error, :warn, :clamp) ||
+        error("FPTFluid: bounds must be :error, :warn, or :clamp, got :$bounds")
+
     content = read(path, String)
     name    = splitext(basename(path))[1]
     tables  = _parse_fpt_tables(content)
@@ -248,7 +257,7 @@ function FPTFluid(path::String)
     Pt_vals_SI = tables["h_T"][1] .* _PSIA_TO_PA
     Tt_vals_SI = tables["h_T"][2][1] .* _R_TO_K
 
-    FPTFluid(name,
+    FPTFluid(name, bounds,
              itp_h, itp_s, itp_cp, itp_gam, itp_rho,
              itp_Th, itp_Ts, itp_hs,
              minimum(Pt_vals_SI), maximum(Pt_vals_SI),
@@ -257,47 +266,62 @@ end
 
 # ── FluidProperties interface ─────────────────────────────────────────────────
 
-_clamp_PT(fp::FPTFluid, T, P) =
+function _bounds_message(fp::FPTFluid, prop::Symbol, T, P)
+    "FPTFluid $(fp.name): $(prop) requested outside table bounds. " *
+    "Requested: T=$(T) K, P=$(P) Pa. " *
+    "Valid: T=$(fp.Tt_min)..$(fp.Tt_max) K, P=$(fp.Pt_min)..$(fp.Pt_max) Pa. " *
+    "Use FPTFluid(path; bounds=:warn) or bounds=:clamp to allow clamped lookup."
+end
+
+function _clamp_PT(fp::FPTFluid, T, P, prop::Symbol)
+    out = (P < fp.Pt_min || P > fp.Pt_max ||
+           T < fp.Tt_min || T > fp.Tt_max)
+    if out
+        msg = _bounds_message(fp, prop, T, P)
+        fp.bounds == :error && throw(DomainError((T=T, P=P), msg))
+        fp.bounds == :warn && @warn msg
+    end
     (clamp(P, fp.Pt_min, fp.Pt_max),
      clamp(T, fp.Tt_min, fp.Tt_max))
+end
 
 function cp(fp::FPTFluid, T, P)
-    Pc, Tc = _clamp_PT(fp, T, P)
+    Pc, Tc = _clamp_PT(fp, T, P, :cp)
     isnothing(fp.itp_cp) && return enthalpy(fp, T+0.5, P) - enthalpy(fp, T-0.5, P)
     fp.itp_cp(Pc, Tc)
 end
 
 function enthalpy(fp::FPTFluid, T, P)
-    Pc, Tc = _clamp_PT(fp, T, P)
+    Pc, Tc = _clamp_PT(fp, T, P, :enthalpy)
     fp.itp_h(Pc, Tc)
 end
 
 function entropy(fp::FPTFluid, T, P)
-    Pc, Tc = _clamp_PT(fp, T, P)
+    Pc, Tc = _clamp_PT(fp, T, P, :entropy)
     fp.itp_s(Pc, Tc)
 end
 
 function density(fp::FPTFluid, T, P)
     isnothing(fp.itp_rho) && return P / (cp(fp,T,P) * (1.0 - 1.0/gamma(fp,T,P)) * T)
-    Pc, Tc = _clamp_PT(fp, T, P)
+    Pc, Tc = _clamp_PT(fp, T, P, :density)
     fp.itp_rho(Pc, Tc)
 end
 
 function gamma(fp::FPTFluid, T, P)
     isnothing(fp.itp_gam) && return 5.0/3.0
-    Pc, Tc = _clamp_PT(fp, T, P)
+    Pc, Tc = _clamp_PT(fp, T, P, :gamma)
     fp.itp_gam(Pc, Tc)
 end
 
 function T_from_h(fp::FPTFluid, h_target, P; T_guess=500.0)
     if !isnothing(fp.itp_Th)
-        Pc = clamp(P, fp.Pt_min, fp.Pt_max)
+        Pc, _ = _clamp_PT(fp, T_guess, P, :T_from_h)
         h_min = enthalpy(fp, fp.Tt_min, Pc)
         h_max = enthalpy(fp, fp.Tt_max, Pc)
         return fp.itp_Th(Pc, clamp(h_target, h_min, h_max))
     end
     # bisection fallback (returns primal; does not propagate AD derivatives)
-    T_lo, T_hi = 100.0, 5000.0
+    T_lo, T_hi = fp.Tt_min, fp.Tt_max
     for _ in 1:60
         T_mid = 0.5 * (T_lo + T_hi)
         enthalpy(fp, T_mid, P) < h_target ? (T_lo = T_mid) : (T_hi = T_mid)
@@ -308,13 +332,13 @@ end
 
 function T_from_s(fp::FPTFluid, s_target, P; T_guess=500.0)
     if !isnothing(fp.itp_Ts)
-        Pc = clamp(P, fp.Pt_min, fp.Pt_max)
+        Pc, _ = _clamp_PT(fp, T_guess, P, :T_from_s)
         s_min = entropy(fp, fp.Tt_min, Pc)
         s_max = entropy(fp, fp.Tt_max, Pc)
         return fp.itp_Ts(Pc, clamp(s_target, s_min, s_max))
     end
     # bisection fallback (returns primal; does not propagate AD derivatives)
-    T_lo, T_hi = 100.0, 5000.0
+    T_lo, T_hi = fp.Tt_min, fp.Tt_max
     for _ in 1:60
         T_mid = 0.5 * (T_lo + T_hi)
         entropy(fp, T_mid, P) < s_target ? (T_lo = T_mid) : (T_hi = T_mid)
@@ -330,7 +354,7 @@ Enthalpy at pressure Pt_out for an isentropic process from entropy s.
 """
 function h_from_s(fp::FPTFluid, s, P)
     if !isnothing(fp.itp_hs)
-        Pc = clamp(P, fp.Pt_min, fp.Pt_max)
+        Pc, _ = _clamp_PT(fp, 0.5 * (fp.Tt_min + fp.Tt_max), P, :h_from_s)
         s_min = entropy(fp, fp.Tt_min, Pc)
         s_max = entropy(fp, fp.Tt_max, Pc)
         return fp.itp_hs(Pc, clamp(s, s_min, s_max))

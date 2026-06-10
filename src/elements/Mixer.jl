@@ -30,6 +30,8 @@ function compute!(mx::Mixer)
     states  = [p[] for p in mx.inlets]
     W_tot   = sum(s.W for s in states)
     fluid   = states[1].fluid
+    all(s -> s.fluid === fluid, states) ||
+        error("Mixer \"$(mx.name)\": all inlet fluids must use the same fluid backend")
     h_mix   = sum(s.W * enthalpy(s.fluid, s.Tt, s.Pt) for s in states) / W_tot
     Pt_mix  = minimum(s.Pt for s in states)
     Tt_mix  = T_from_h(fluid, h_mix, Pt_mix)

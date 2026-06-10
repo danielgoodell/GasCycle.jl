@@ -25,6 +25,8 @@ Usage:
   sol = solve!(net)
 """
 
+using ForwardDiff
+
 # ── Port edge ─────────────────────────────────────────────────────────────────
 
 struct PortEdge
@@ -98,6 +100,16 @@ function _get_stored_inlet(el::AbstractElement, port::Symbol)
     nothing
 end
 
+function _strip_to_type(x, ::Type{T}) where T
+    x isa T && return x
+    x isa ForwardDiff.Dual && return _strip_to_type(ForwardDiff.value(x), T)
+    T(x)
+end
+
+# ── Compute one element and store its outlets in avail ────────────────────────
+
+const _AvailMap = Dict{Tuple{Int,Symbol}, Any}
+
 """Inlet port names that must be satisfied before element can be computed."""
 function _required_inlets(el::AbstractElement)::Vector{Symbol}
     el isa HeatExchanger && return [:cold_inlet, :hot_inlet]
@@ -107,9 +119,20 @@ function _required_inlets(el::AbstractElement)::Vector{Symbol}
     [:inlet]
 end
 
-# ── Compute one element and store its outlets in avail ────────────────────────
-
-const _AvailMap = Dict{Tuple{Int,Symbol}, Any}
+function _unprocessed_error(net::FlowNetwork, processed::AbstractVector{Bool}, avail::_AvailMap)
+    parts = String[]
+    for el_idx in eachindex(net.elements)
+        processed[el_idx] && continue
+        el = net.elements[el_idx]
+        missing = [p for p in _required_inlets(el) if !haskey(avail, (el_idx, p))]
+        push!(parts,
+              "$(el.name) ($(typeof(el))): missing " *
+              join(string.(":", missing), ", "))
+    end
+    error("FlowNetwork one_pass!: traversal stalled with unprocessed elements. " *
+          "Check for missing connections or unmarked cycles. " *
+          join(parts, "; "))
+end
 
 function _compute_element!(net::FlowNetwork, el_idx::Int, avail::_AvailMap)
     el = net.elements[el_idx]
@@ -253,15 +276,18 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
 
         if !isnothing(back_edge_seeds)
             # Explicit seeds: caller supplies Tt and Pt for each back-edge.
-            # W and fluid come from net.seed_state (always Float64 or the outer
-            # Dual if W is a design param) — this avoids inheriting inner-Dual
-            # contamination from a previous AutoForwardDiff Jacobian pass.
-            # W is conserved in closed cycles, so seed_state.W == flow at any
-            # back-edge (splits recombine in Mixers before the turbine).
+            # Preserve W and fluid from the source outlet when available, so
+            # branch networks whose back-edge flow differs from seed_state.W
+            # keep the correct heat-capacity rate.  The mass-flow value is
+            # stripped back to seed_state.W's numeric type to avoid carrying
+            # temporary inner-Dual values cached by NonlinearSolve's Jacobian
+            # evaluations into the next primal residual call.
             Tt_s = back_edge_seeds[2*be_idx - 1]
             Pt_s = back_edge_seeds[2*be_idx]
+            base = isnothing(src_out) ? net.seed_state : src_out[]
+            W_s = _strip_to_type(base.W, typeof(net.seed_state.W))
             avail[(edge.dst, edge.dst_port)] =
-                Port(FluidState(Pt_s, Tt_s, net.seed_state.W, net.seed_state.fluid))
+                Port(FluidState(Pt_s, Tt_s, W_s, base.fluid))
         else
             # Legacy: seed from stored outlet of previous pass.
             avail[(edge.dst, edge.dst_port)] =
@@ -300,6 +326,8 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
             end
         end
     end
+
+    all(processed) || _unprocessed_error(net, processed, avail)
 
     # Shaft speed broadcast
     for sh in net.shafts

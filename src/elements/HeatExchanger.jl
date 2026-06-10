@@ -6,8 +6,7 @@ Models a two-stream heat exchanger using the ε-NTU method.  The two streams
 `add_hx_pair!`.
 
   Q = ε * Q_max
-  Q_max = min(Ċ_hot, Ċ_cold) * (Tt_hot_in - Tt_cold_in)
-  Ċ = ṁ * cp    [W/K]
+  Q_max is computed from the limiting endpoint enthalpy change.
 
 Both streams conserve mass flow; only Tt changes (pressure loss dPqP applied
 to each stream independently).
@@ -38,6 +37,24 @@ function HeatExchanger(name::String;
                      nothing, nothing, nothing, nothing)
 end
 
+function _qmax_enthalpy(sh::FluidState, sc::FluidState)
+    fp_h = sh.fluid
+    fp_c = sc.fluid
+
+    h_h_in = enthalpy(fp_h, sh.Tt, sh.Pt)
+    h_c_in = enthalpy(fp_c, sc.Tt, sc.Pt)
+    h_h_at_cold = enthalpy(fp_h, sc.Tt, sh.Pt)
+    h_c_at_hot = enthalpy(fp_c, sh.Tt, sc.Pt)
+
+    Q_hot_limit = sh.W * (h_h_in - h_h_at_cold)
+    Q_cold_limit = sc.W * (h_c_at_hot - h_c_in)
+
+    # For reverse temperature ordering, both limits are negative and the
+    # physically limiting magnitude is the value closer to zero.
+    sh.Tt >= sc.Tt ? min(Q_hot_limit, Q_cold_limit) :
+                     max(Q_hot_limit, Q_cold_limit)
+end
+
 """
     compute_hx!(hx) -> (hot_outlet, cold_outlet)
 
@@ -54,20 +71,17 @@ function compute_hx!(hx::HeatExchanger)
     fp_h = sh.fluid
     fp_c = sc.fluid
 
-    Cp_h = cp(fp_h, sh.Tt, sh.Pt)
-    Cp_c = cp(fp_c, sc.Tt, sc.Pt)
-
-    Cdot_h = sh.W * Cp_h   # W/K
-    Cdot_c = sc.W * Cp_c
-
-    Q_max = min(Cdot_h, Cdot_c) * (sh.Tt - sc.Tt)
+    Q_max = _qmax_enthalpy(sh, sc)
     Q     = hx.ε * Q_max           # total heat transferred [W]
-
-    Tt_h_out = sh.Tt - Q / Cdot_h
-    Tt_c_out = sc.Tt + Q / Cdot_c
 
     Pt_h_out = sh.Pt * (1 - hx.dPqP_hot)
     Pt_c_out = sc.Pt * (1 - hx.dPqP_cold)
+
+    h_h_out = enthalpy(fp_h, sh.Tt, sh.Pt) - Q / sh.W
+    h_c_out = enthalpy(fp_c, sc.Tt, sc.Pt) + Q / sc.W
+
+    Tt_h_out = T_from_h(fp_h, h_h_out, Pt_h_out; T_guess = sh.Tt)
+    Tt_c_out = T_from_h(fp_c, h_c_out, Pt_c_out; T_guess = sc.Tt)
 
     hx.hot_outlet  = Port(update(sh; Pt = Pt_h_out, Tt = Tt_h_out))
     hx.cold_outlet = Port(update(sc; Pt = Pt_c_out, Tt = Tt_c_out))
@@ -88,10 +102,13 @@ set_indep_vars!(el::HeatExchanger, x::AbstractVector) = nothing
 """Heat transferred from hot to cold stream [W]."""
 function Q_transferred(hx::HeatExchanger)
     isnothing(hx.hot_inlet)  && return 0.0
+    if !isnothing(hx.hot_outlet)
+        sh = hx.hot_inlet[]
+        oh = hx.hot_outlet[]
+        return sh.W * (enthalpy(sh) - enthalpy(oh))
+    end
+
     sh = hx.hot_inlet[]
     sc = hx.cold_inlet[]
-    Cp_h  = cp(sh.fluid, sh.Tt, sh.Pt)
-    Cp_c  = cp(sc.fluid, sc.Tt, sc.Pt)
-    Q_max = min(sh.W * Cp_h, sc.W * Cp_c) * (sh.Tt - sc.Tt)
-    hx.ε * Q_max
+    hx.ε * _qmax_enthalpy(sh, sc)
 end

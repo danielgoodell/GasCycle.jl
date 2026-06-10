@@ -82,5 +82,30 @@ end
         # T_from_s round-trip
         s_val = entropy(fl, T_test, P_test)
         @test T_from_s(fl, s_val, P_test; T_guess=T_test) ≈ T_test  rtol=1e-3
+
+        # Out-of-table lookups fail fast by default with a useful bounds error.
+        err = try
+            enthalpy(fl, fl.Tt_max + 10.0, P_test)
+        catch e
+            e
+        end
+        @test err isa DomainError
+        msg = sprint(showerror, err)
+        @test occursin("outside table bounds", msg)
+        @test occursin("enthalpy", msg)
+        @test occursin("bounds=:warn", msg)
+        @test occursin("bounds=:clamp", msg)
+
+        # Compatibility modes are explicit: warn+clamp or silent clamp.
+        fl_warn = FPTFluid(fpt_path; bounds=:warn)
+        @test_logs (:warn, r"cp requested outside table bounds") begin
+            GasCycle.cp(fl_warn, fl_warn.Tt_max + 10.0, P_test)
+        end
+
+        fl_clamp = FPTFluid(fpt_path; bounds=:clamp)
+        @test GasCycle.cp(fl_clamp, fl_clamp.Tt_max + 10.0, P_test) ≈
+              GasCycle.cp(fl_clamp, fl_clamp.Tt_max, P_test)
+
+        @test_throws ErrorException FPTFluid(fpt_path; bounds=:extrapolate)
     end
 end

@@ -301,7 +301,17 @@ end
 Thermal efficiency = net power / total heat input from all HeatSource elements.
 """
 function cycle_efficiency(r::SolveResult)
-    Q_in = sum(el.Q for el in r.net.elements if el isa HeatSource; init=0.0)
+    Q_in = sum(r.net.elements; init=0.0) do el
+        if el isa HeatSource
+            if !isnothing(el.inlet) && !isnothing(el.outlet)
+                (enthalpy(el.outlet[]) - enthalpy(el.inlet[])) * el.inlet[].W
+            else
+                el.Q
+            end
+        else
+            0.0
+        end
+    end
     Q_in ≈ 0.0 && return 0.0
     net_power(r) / Q_in
 end
