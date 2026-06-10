@@ -125,12 +125,34 @@ Priority driver: mission needs (SR-1 Freedom) put **off-design fidelity,
 inventory control, and slow transients** at the top of the physics track.
 The convenience batch is cheap and can be interleaved anytime.
 
-### 6. Cold-end physics: Cooler / Radiator element
+### 6. Cold-end physics: Cooler / Radiator element  ✅ DONE (2026-06-10)
 There is currently no heat-rejection element — loop closure leans on
 `set_state!` pinning the compressor inlet. Add a `Cooler` (ground test:
 water-cooled HX with ε or UA) and `Radiator` (space: T⁴ rejection with area
 and sink temperature) so compressor inlet temperature responds to the
 operating point. Prerequisite for meaningful off-design and transients.
+
+Implemented as four pieces (see `test/test_cooler.jl` for the end-to-end
+closed-loop demos):
+- `ConstantPropertyLiquid` coolant backend (constant cp/ρ, closed-form
+  inversions, full AD); reads the collaborator's function-style FPT files
+  (`H2O.fpt`, `Oil.fpt` — constant-return Cp/rho in BTU/lbm·R and lbm/ft³,
+  including Oil.fpt's one-level `Cp → Cpt` delegation).
+- Cooler = `HeatExchanger` with the new `UA` keyword (`mode=:UA`):
+  counter-flow ε-NTU each pass, so effectiveness responds to off-design
+  flows/properties.  Coolant side enters via `set_boundary!`.  This is also
+  the machinery item 8 needs (only the UA(ṁ) scaling law remains).
+- `Radiator` element: segmented σεA(T⁴−Tsink⁴) integration (Heun marching);
+  `mode=:fixed_TtExit` sizes A at design, `mode=:fixed_area` is the
+  off-design response mode.  Two-way flux (warms toward sink if entering
+  below it).
+- Loop closure through the cold end: `connect_port!(...; back_edge=true)`
+  marks cooler/radiator-outlet → compressor-inlet as a back-edge, so the
+  compressor inlet (Tt, Pt) joins the Newton unknowns and `set_state!` only
+  supplies W, fluid, and the initial guess.  Works in design mode when the
+  turbine uses `:pressure_closure` and in map-based off-design (where the
+  maps give pressure closure a free variable); a design loop with every PR
+  fixed is structurally degenerate and still needs the pinned inlet.
 
 ### 7. Inventory control and per-component volume bookkeeping
 Real CBC power control is charge-pressure (inventory) control. Plan:

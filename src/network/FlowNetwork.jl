@@ -281,16 +281,26 @@ _flatten_chain(p::Pair) = [_flatten_chain(p.first)..., _flatten_chain(p.second).
 _flatten_chain(el)      = [el]
 
 """
-    connect_port!(net, src, src_port, dst, dst_port)
+    connect_port!(net, src, src_port, dst, dst_port; back_edge=false)
 
 Add an explicit port-to-port edge.  Used for bleed and bypass branches where
 the default `:outlet` → `:inlet` mapping doesn't apply.
+
+With `back_edge=true` the edge is seeded rather than waited on, and its
+(Tt, Pt) state joins the solver's back-edge unknowns.  Use this to close a
+loop through the cold end (cooler/radiator outlet → compressor inlet) so the
+compressor inlet state responds to the operating point instead of being
+pinned: `set_state!` at the compressor then only provides the mass flow,
+fluid, and initial guess.  Note the loop pressure closure must have a free
+variable to act on — map-driven off-design solves have this naturally;
+design-mode solves with every pressure ratio fixed do not.
 """
 function connect_port!(net::FlowNetwork,
                        src::AbstractElement, src_port::Symbol,
-                       dst::AbstractElement, dst_port::Symbol)
+                       dst::AbstractElement, dst_port::Symbol;
+                       back_edge::Bool = false)
     push!(net.edges,
-          PortEdge(_el_idx(net, src), src_port, _el_idx(net, dst), dst_port, false))
+          PortEdge(_el_idx(net, src), src_port, _el_idx(net, dst), dst_port, back_edge))
     _invalidate_plan!(net)
 end
 

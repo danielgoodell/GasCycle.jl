@@ -7,6 +7,7 @@ include("units.jl")
 include("thermo/FluidProperties.jl")
 include("thermo/IdealGasFluid.jl")
 include("thermo/FPTFluid.jl")
+include("thermo/ConstantPropertyLiquid.jl")
 
 # ── Core abstractions ─────────────────────────────────────────────────────────
 include("core/FluidState.jl")
@@ -24,6 +25,7 @@ include("elements/Turbine.jl")
 include("elements/Duct.jl")
 include("elements/Shaft.jl")
 include("elements/HeatSource.jl")
+include("elements/Radiator.jl")
 include("elements/HeatExchanger.jl")
 include("elements/Splitter.jl")
 include("elements/Mixer.jl")
@@ -43,7 +45,7 @@ export btulbm_to_Jkg, Jkg_to_btulbm, btulbmR_to_JkgK, JkgK_to_btulbmR
 export lbmft3_to_kgm3, kgm3_to_lbmft3, rpm_to_radps, radps_to_rpm
 export hp_to_W, W_to_hp
 
-export FluidProperties, IdealGasFluid, HeXeIdealGas, FPTFluid
+export FluidProperties, IdealGasFluid, HeXeIdealGas, FPTFluid, ConstantPropertyLiquid
 # Note: `cp` is not exported to avoid conflict with Base.Filesystem.cp in Julia ≥ 1.12.
 # Use GasCycle.cp(...) or `import GasCycle: cp` to access it.
 export enthalpy, entropy, density, gamma, T_from_h, T_from_s, h_from_s
@@ -54,8 +56,8 @@ export update
 export PerformanceMap, scale_map, query, corrected_speed, corrected_flow
 export read_npss_map, to_performance_map, NPSSMapTable
 
-export Compressor, Turbine, Duct, Shaft, HeatSource, HeatExchanger, Splitter, Mixer
-export compute!, compute_hx!, specific_work, pressure_ratio, Q_transferred, power_balance
+export Compressor, Turbine, Duct, Shaft, HeatSource, HeatExchanger, Radiator, Splitter, Mixer
+export compute!, compute_hx!, specific_work, pressure_ratio, Q_transferred, Q_rejected, power_balance
 export n_residuals, residuals, indep_vars, set_indep_vars!
 export link!
 

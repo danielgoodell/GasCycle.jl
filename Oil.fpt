@@ -1,0 +1,33 @@
+
+// Table independents
+indeps = {"Tt", "Pt"};
+hsIndeps = {"S", "Pt"};
+shIndeps = {"ht", "Pt"};
+TsIndeps = {"S", "Pt"};
+hTindeps = {"Tt", "Pt"};
+sTindeps = {"Tt", "Pt"};
+ThIndeps = {"ht", "Pt"};
+
+real Cp( real T, real P ){
+
+	return Cpt( T );	
+}
+
+real Cpt( real T ){
+	return 0.8;
+
+}
+
+real rho( real T, real P) {
+	return  62.424;
+}
+
+real h_T( real T, real P ){
+	
+	return T*0.8;
+}
+
+real T_h( real h, real P ){
+	
+	return h/0.8;
+}

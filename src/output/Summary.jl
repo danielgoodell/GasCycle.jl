@@ -170,6 +170,7 @@ end
 
 function _describe(el::HeatExchanger)
     str = @sprintf("ε=%.4f", _scalar(el.ε))
+    el.mode == :UA && (str *= @sprintf(" (UA=%.1f W/K)", _scalar(el.UA)))
     isnothing(el.hot_inlet) ||
         (str *= @sprintf("  Q=%.2f kW", _scalar(Q_transferred(el)) / 1e3))
     str
@@ -182,6 +183,12 @@ function _describe(el::HeatSource)
     else
         @sprintf("Q=%.2f kW  dP/P=%.3f", _scalar(el.Q) / 1e3, _scalar(el.dPqP))
     end
+end
+
+function _describe(el::Radiator)
+    @sprintf("A=%.2f m²  ε_r=%.2f  Tsink=%.1f K  Q=%.2f kW",
+             _scalar(el.A), _scalar(el.emissivity), _scalar(el.T_sink),
+             _scalar(Q_rejected(el)) / 1e3)
 end
 
 _describe(sh::Shaft) = begin
