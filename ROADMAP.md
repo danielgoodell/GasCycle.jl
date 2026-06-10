@@ -53,14 +53,34 @@ Fix (NPSS-style formulation):
   cycle 2060→1236 °R at 36 krpm (21/21 converged, design power reproduced,
   self-sustain threshold near 1330 °R).
 
-### 4. FPT AD via implicit-function rule  ← NEXT
-`T_from_h` / `T_from_s` in FPTFluid use bisection that drops Dual derivatives,
-so AD currently only fully works with the ideal-gas backend. Add a custom
-ForwardDiff rule (implicit function theorem: dT = dh / cp etc.) so
-gradient-based optimization works with real He-Xe table data — a headline
-goal over NPSS.
+### 4. Direct He-Xe property module  ← NEXT
+Replace the FPT-table dependency with a native `HeXeFluid(x_He)` backend
+built from the collaborator's FPT-generation source code (to be obtained).
+Decided 2026-06-09, superseding the earlier "FPT AD" item — rationale:
+
+- Checked HeXe84.fpt against ideal monatomic gas: within ~0.5% at cycle
+  conditions (300–1150 K, ~100–300 kPa), but real-gas corrections are
+  genuinely present near the xenon-critical corner (at 260 K / 1.5 MPa:
+  Cp −9%, density +4.8% vs ideal). The generator includes a virial-style
+  EOS, not just kinetic theory.
+- A direct module gives any mixture ratio without regenerating files, no
+  interpolation error, smooth functions, and free ForwardDiff support if
+  written generically — which makes AD-through-tables mostly moot.
+- The transport-property part (μ, k, Pr) is the piece that can't be
+  trivially rederived, and will be needed for real heat-exchanger sizing
+  (NTU from UA) and loss models. The `FluidProperties` interface doesn't
+  expose transport yet — add that alongside.
+
+Keep the FPT reader regardless: reading the literal file the collaborator
+feeds NPSS is the cleanest apples-to-apples cross-validation available.
 
 ### Backlog (lower priority)
+- **FPT AD via implicit-function rule** (deferred with trigger): dT = dh/cp
+  on the bisection inversions is ~half a day, but gradients through
+  `Gridded(Linear())` tables are piecewise-constant — useful AD also needs
+  cubic interpolation. Do this only if a table-only fluid enters the model
+  (e.g., Oil.fpt / H2O.fpt for a heat-rejection coolant loop, which have no
+  closed form to escape to).
 - Recuperator uses `cp·ΔT` instead of enthalpy differences (fine for
   monatomic He-Xe, approximate in general).
 - Network validation: error if `one_pass!` leaves elements unprocessed;
