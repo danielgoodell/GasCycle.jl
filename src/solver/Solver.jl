@@ -16,8 +16,10 @@ Two modes of operation:
 
 2. **Newton-Raphson with finite differences** (n_indeps > 0):
    Used for off-design where shaft speed, map operating points, etc. are
-   unknowns with associated residual equations.
-   Uses AutoFiniteDiff() because shaft struct fields are Float64.
+   unknowns with associated residual equations.  Any back-edge (Tt, Pt)
+   states are appended to the unknown vector and solved simultaneously, so
+   closed loops and off-design unknowns share one Newton iteration.
+   Uses AutoFiniteDiff() because element struct fields are Float64.
 """
 
 using LinearAlgebra: norm
@@ -192,20 +194,45 @@ function solve!(net::FlowNetwork;
     end
 
     # ── Off-design mode ───────────────────────────────────────────────────────
-    # Back-edges are handled inside one_pass!(net) using stored element outlets
-    # (legacy fixed-point seeding).  The outer Newton resolves the off-design
-    # unknowns (shaft speed, map operating point, etc.).
-    function od_residual!(F, x, _p)
-        _scatter_indeps!(net, x, slices)
-        one_pass!(net)
+    # Unknown vector u = [element/shaft indeps; back-edge (Tt, Pt) pairs].
+    # The back-edge states are folded into the same Newton solve so each
+    # residual evaluation is a deterministic function of u.  (Seeding back-edges
+    # from stored outlets inside one_pass! — the old behaviour — leaves stale
+    # state between iterations and corrupts finite-difference Jacobians.)
+    #
+    # The solve runs in NORMALIZED unknowns v = u ./ uref: raw unknowns mix
+    # corrected flows (~0.5), shaft speeds (~10⁴), and back-edge Tt/Pt
+    # (~10³/10⁵), which makes the raw Jacobian condition number ~10⁶ and
+    # stalls the globalization just above tolerance.  Residuals are already
+    # dimensionless, so scaling the columns brings cond(J) to O(10).
+    u0   = vcat(x0, _back_edge_z0(net, back_edges))
+    uref = [abs(u) > 0 ? abs(u) : 1.0 for u in u0]
+
+    function od_residual!(F, v, _p)
+        u = v .* uref
+        _scatter_indeps!(net, view(u, 1:n_x), slices)
+        z = view(u, n_x+1:length(u))
+        one_pass!(net, n_be == 0 ? nothing : z)
         r = _collect_residuals(net)
-        copyto!(F, r)
+        copyto!(F, 1, r, 1, length(r))
+        for (i, edge) in enumerate(back_edges)
+            src_out = _get_outlet(net.elements[edge.src], edge.src_port)
+            if isnothing(src_out)
+                F[n_res + 2i - 1] = 0.0
+                F[n_res + 2i]     = 0.0
+            else
+                F[n_res + 2i - 1] = (src_out[].Tt - z[2i-1]) / z[2i-1]
+                F[n_res + 2i]     = (src_out[].Pt - z[2i])   / z[2i]
+            end
+        end
         nothing
     end
 
-    prob = NonlinearProblem(od_residual!, x0, nothing)
+    # TrustRegion rather than plain Newton for robustness far from the
+    # solution (map slope kinks at grid lines make undamped steps unreliable).
+    prob = NonlinearProblem(od_residual!, u0 ./ uref, nothing)
     nls  = NonlinearSolve.solve(prob,
-               NewtonRaphson(autodiff = AutoFiniteDiff());
+               TrustRegion(autodiff = AutoFiniteDiff());
                abstol   = tol,
                reltol   = tol,
                maxiters = maxiter)
@@ -214,8 +241,9 @@ function solve!(net::FlowNetwork;
     converged = rn < tol
     iters     = nls.stats.nsteps
 
-    _scatter_indeps!(net, nls.u, slices)
-    one_pass!(net)
+    u_final = nls.u .* uref
+    _scatter_indeps!(net, view(u_final, 1:n_x), slices)
+    one_pass!(net, n_be == 0 ? nothing : u_final[n_x+1:end])
 
     if verbose
         status = converged ? "converged" : "DID NOT CONVERGE"

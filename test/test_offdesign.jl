@@ -13,6 +13,21 @@ maps scaled through the design point, must recover the design shaft speed,
 pressure ratios, and efficiencies.
 """
 
+# Synthetic base maps shared by the off-design testsets: smooth analytic
+# surfaces with physically-signed slopes (compressor PR falls with flow,
+# turbine PR rises with flow; both rise with speed).
+function synthetic_base_maps()
+    Nc_ax = collect(0.5:0.05:1.3)
+    Wc_ax = collect(0.4:0.05:1.4)
+    cbase = PerformanceMap(Nc_ax, Wc_ax,
+        [1.0 + 1.5 * n^2 * (1.3 - 0.5 * w) for n in Nc_ax, w in Wc_ax],
+        [0.83 - 0.3 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
+    tbase = PerformanceMap(Nc_ax, Wc_ax,
+        [1.0 + 2.0 * w * sqrt(n)           for n in Nc_ax, w in Wc_ax],
+        [0.88 - 0.2 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
+    (cbase, tbase)
+end
+
 @testset "Off-design map operation" begin
     fluid = IdealGasFluid(M_molar = 83.8)   # HeXe84
 
@@ -48,15 +63,7 @@ pressure ratios, and efficiencies.
     Nc_c, Wc_c = corrected_speed(N_des, T1),  corrected_flow(W, T1, P1)
     Nc_t, Wc_t = corrected_speed(N_des, Tt3), corrected_flow(W, Tt3, Pt3)
 
-    # ── Synthetic base maps (smooth, physically-signed slopes) ────────────────
-    Nc_ax = collect(0.5:0.05:1.3)
-    Wc_ax = collect(0.4:0.05:1.4)
-    cbase = PerformanceMap(Nc_ax, Wc_ax,
-        [1.0 + 1.5 * n^2 * (1.3 - 0.5 * w) for n in Nc_ax, w in Wc_ax],
-        [0.83 - 0.3 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
-    tbase = PerformanceMap(Nc_ax, Wc_ax,
-        [1.0 + 2.0 * w * sqrt(n)           for n in Nc_ax, w in Wc_ax],
-        [0.88 - 0.2 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
+    cbase, tbase = synthetic_base_maps()
 
     # Reference point chosen off-node so the design point lands inside smooth
     # interpolation cells rather than on a grid kink.
@@ -112,5 +119,102 @@ pressure ratios, and efficiencies.
         @test shaft.N < N_des
         @test shaft.N > 0.5 * N_des
         @test comp.PR < PR_c
+    end
+end
+
+@testset "Off-design closed loop (recuperated BRU-like)" begin
+    fluid = IdealGasFluid(M_molar = 83.8)
+
+    # BRU-like parameters (NASA TN D-5815, ideal-gas stand-in for HeXe84)
+    T1, P1, W = 300.0, 163.4e3, 0.6
+    PR_c, η_c = 1.9, 0.80
+    η_t       = 0.87
+    ε_recup   = 0.95
+    dPqP_cold, dPqP_hot, dPqP_heat = 0.011, 0.022, 0.027
+    TIT       = 1144.0
+    N_des     = 36_000.0
+
+    # Turbine exhausts so the loop pressure closes back to P1 through the
+    # recuperator hot side.
+    P_exit = P1 / (1 - dPqP_hot)
+
+    function build_loop(; comp_kw=(;), turb_kw=(;), shaft_kw=(;), TtExit=TIT)
+        comp  = Compressor("Comp"; η_poly=η_c, comp_kw...)
+        recup = HeatExchanger("Recup"; ε=ε_recup,
+                              dPqP_hot=dPqP_hot, dPqP_cold=dPqP_cold)
+        heat  = HeatSource("Heater"; TtExit=TtExit, dPqP=dPqP_heat)
+        turb  = Turbine("Turb"; η_poly=η_t, turb_kw...)
+        shaft = Shaft("Shaft"; shaft_kw...)
+
+        net = FlowNetwork()
+        add!(net, comp, recup, heat, turb)
+        connect!(net, comp => recup => heat => turb => comp)
+        add_shaft!(net, shaft; drives=comp, driven_by=turb)
+        add_hx_pair!(net, recup; hot=turb)
+        set_state!(net, comp; Pt=P1, Tt=T1, W=W, fluid=fluid)
+        (net, comp, recup, heat, turb, shaft)
+    end
+
+    # ── Design solve (back-edge Newton; fixed PR, pressure closure) ──────────
+    net_d, comp_d, recup_d, heat_d, turb_d, shaft_d =
+        build_loop(comp_kw=(PR=PR_c,),
+                   turb_kw=(mode=:pressure_closure, P_exit=P_exit),
+                   shaft_kw=(N=N_des,))
+    sol_d = solve!(net_d)
+    @test sol_d.status == :success
+
+    P_net_des = net_power(sol_d)
+    PR_t_des  = pressure_ratio(turb_d)
+    @test P_net_des > 0
+
+    s_t = turb_d.inlet[]
+    Nc_c, Wc_c = corrected_speed(N_des, T1),     corrected_flow(W, T1, P1)
+    Nc_t, Wc_t = corrected_speed(N_des, s_t.Tt), corrected_flow(W, s_t.Tt, s_t.Pt)
+
+    cbase, tbase = synthetic_base_maps()
+    cmap = scale_map(cbase; Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_c, eta_des=η_c,
+                     Nc_ref=0.93, Wc_ref=0.87)
+    tmap = scale_map(tbase; Nc_des=Nc_t, Wc_des=Wc_t, PR_des=PR_t_des, eta_des=η_t,
+                     Nc_ref=0.93, Wc_ref=0.87)
+
+    @testset "design-point reproduction with generator load" begin
+        net, comp, recup, heat, turb, shaft =
+            build_loop(comp_kw=(map=cmap, mode=:off_design),
+                       turb_kw=(map=tmap, mode=:off_design),
+                       shaft_kw=(N=0.97 * N_des, mode=:off_design, P_load=P_net_des))
+        sol = solve!(net)
+
+        @test sol.status == :success
+        @test shaft.N ≈ N_des rtol=1e-3
+        @test pressure_ratio(comp) ≈ PR_c     rtol=1e-3
+        @test pressure_ratio(turb) ≈ PR_t_des rtol=1e-3
+        @test comp.Wc_map ≈ Wc_c rtol=1e-3
+        @test turb.Wc_map ≈ Wc_t rtol=1e-3
+        @test power_balance(shaft) ≈ P_net_des rtol=1e-3
+    end
+
+    @testset "TIT sweep at constant speed (plan phase 7)" begin
+        # Alternator-locked shaft: N fixed at design (no shaft residual);
+        # the map operating points and the loop back-edge are the unknowns.
+        net, comp, recup, heat, turb, shaft =
+            build_loop(comp_kw=(map=cmap, mode=:off_design),
+                       turb_kw=(map=tmap, mode=:off_design),
+                       shaft_kw=(N=N_des,))
+
+        fracs  = collect(1.0:-0.05:0.6)
+        powers = Float64[]
+        for frac in fracs
+            heat.TtExit = frac * TIT
+            sol = solve!(net)
+            @test sol.status == :success
+            @test abs(residuals(comp)[1]) < 1e-6
+            @test abs(residuals(turb)[1]) < 1e-6
+            push!(powers, net_power(sol))
+        end
+
+        # 100% TIT must reproduce the design point; power falls monotonically
+        # as TIT is throttled back.
+        @test powers[1] ≈ P_net_des rtol=1e-3
+        @test all(diff(powers) .< 0)
     end
 end

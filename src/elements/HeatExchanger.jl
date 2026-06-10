@@ -83,7 +83,7 @@ compute!(el::HeatExchanger, inlet::Port) = error(
 n_residuals(el::HeatExchanger) = 0
 residuals(el::HeatExchanger)   = Float64[]
 indep_vars(el::HeatExchanger)  = Float64[]
-set_indep_vars!(el::HeatExchanger, x) = nothing
+set_indep_vars!(el::HeatExchanger, x::AbstractVector) = nothing
 
 """Heat transferred from hot to cold stream [W]."""
 function Q_transferred(hx::HeatExchanger)

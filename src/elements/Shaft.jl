@@ -11,20 +11,24 @@ In :design mode for a CLOSED POWER CYCLE:
 
 In :off_design mode:
   - Shaft speed N is the independent variable.
-  - The power balance (W_turbine - W_compressor = 0) is enforced as a residual.
-    This is appropriate when turbine PR comes from a performance map and shaft
-    speed is adjusted until the power balance closes.
+  - The power balance (W_turbine - W_compressor - P_load = 0) is enforced as a
+    residual.  This is appropriate when turbine PR comes from a performance map
+    and shaft speed is adjusted until the power balance closes.  P_load is the
+    power extracted from the shaft by a generator/alternator [W]; the default
+    of 0 gives the classic gas-generator balance.
 """
 mutable struct Shaft <: AbstractElement
     name::String
     N::Float64                       # shaft speed [rpm]
     mode::Symbol
+    P_load::Float64                  # generator power extraction [W] (:off_design)
     producers::Vector{AbstractElement}   # turbines
     consumers::Vector{AbstractElement}   # compressors
 end
 
-function Shaft(name::String; N::Float64 = 10000.0, mode::Symbol = :design)
-    Shaft(name, N, mode, AbstractElement[], AbstractElement[])
+function Shaft(name::String; N::Float64 = 10000.0, mode::Symbol = :design,
+               P_load::Float64 = 0.0)
+    Shaft(name, N, mode, P_load, AbstractElement[], AbstractElement[])
 end
 
 """Called by FlowNetwork after connect! to wire turbines and compressors."""
@@ -53,7 +57,7 @@ function residuals(el::Shaft)
     W_prod  = sum(specific_work(t) * t.inlet[].W for t in el.producers; init=0.0)
     W_cons  = sum(specific_work(c) * c.inlet[].W for c in el.consumers; init=0.0)
     W_scale = max(abs(W_prod), abs(W_cons), 1.0)
-    [(W_prod - W_cons) / W_scale]
+    [(W_prod - W_cons - el.P_load) / W_scale]
 end
 
 indep_vars(el::Shaft) = el.mode == :off_design ? [el.N] : Float64[]

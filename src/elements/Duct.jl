@@ -28,4 +28,4 @@ end
 n_residuals(el::Duct)  = 0
 residuals(el::Duct)    = Float64[]
 indep_vars(el::Duct)   = Float64[]
-set_indep_vars!(el::Duct, x) = nothing
+set_indep_vars!(el::Duct, x::AbstractVector) = nothing
