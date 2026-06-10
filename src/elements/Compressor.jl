@@ -16,13 +16,21 @@ divided by polytropic efficiency.  Supports two operating modes:
                (flow continuity onto the map; one equation, one unknown).
                Shaft speed itself belongs to the Shaft element.
 
+Efficiency semantics are selected by `η_type`:
+  :polytropic (default) — η_poly is the polytropic (small-stage) efficiency,
+                          applied by stepwise integration.
+  :isentropic           — η_poly is the adiabatic (isentropic) efficiency,
+                          applied to the full Δh_is in one step.  This matches
+                          NPSS `effDes`/map `eff` semantics.
+
 The type parameter T allows design variables PR and η_poly to carry
 ForwardDiff Dual numbers for gradient-based design optimization.
 """
 mutable struct Compressor{T<:Real} <: AbstractElement
     name::String
     PR::T            # total pressure ratio
-    η_poly::T        # polytropic efficiency (≈ adiabatic for small stages)
+    η_poly::T        # efficiency value; meaning set by η_type
+    η_type::Symbol   # :polytropic or :isentropic
     map::Union{PerformanceMap, Nothing}
     mode::Symbol     # :design or :off_design
     N_shaft::Float64 # shaft speed [rpm] — set by Shaft each iteration
@@ -36,10 +44,13 @@ end
 function Compressor(name::String;
                     PR         = 2.0,
                     η_poly      = 0.87,
+                    η_type::Symbol = :polytropic,
                     map::Union{PerformanceMap,Nothing} = nothing,
                     mode::Symbol = :design)
+    η_type in (:polytropic, :isentropic) ||
+        error("Compressor \"$name\": η_type must be :polytropic or :isentropic, got :$η_type")
     T = promote_type(typeof(PR), typeof(η_poly))
-    Compressor{T}(name, T(PR), T(η_poly), map, mode, 0.0, nothing, nothing, 0.0)
+    Compressor{T}(name, T(PR), T(η_poly), η_type, map, mode, 0.0, nothing, nothing, 0.0)
 end
 
 function compute!(el::Compressor, inlet::Port)::Port
@@ -58,7 +69,7 @@ function compute!(el::Compressor, inlet::Port)::Port
 
     fp     = s.fluid
     Pt_out = s.Pt * el.PR
-    Tt_out = _polytropic_outlet(fp, s.Tt, s.Pt, Pt_out, el.η_poly)
+    Tt_out = _efficiency_outlet(el.η_type, fp, s.Tt, s.Pt, Pt_out, el.η_poly)
 
     outlet_state = update(s; Pt = Pt_out, Tt = Tt_out)
     el.outlet = Port(outlet_state)

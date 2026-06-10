@@ -15,13 +15,18 @@ Modes:
                       variable owned by the solver.  Residual: Wc_map - actual_Wc
                       = 0.  Shaft speed itself belongs to the Shaft element.
 
+Efficiency semantics are selected by `η_type` (see Compressor): :polytropic
+(default, small-stage integration) or :isentropic (adiabatic efficiency on
+the full Δh_is, matching NPSS `effDes`).
+
 The type parameter T allows design variables PR, η_poly, and P_exit to carry
 ForwardDiff Dual numbers for gradient-based design optimization.
 """
 mutable struct Turbine{T<:Real} <: AbstractElement
     name::String
     PR::T            # expansion ratio (Pt_in / Pt_out)
-    η_poly::T        # polytropic efficiency
+    η_poly::T        # efficiency value; meaning set by η_type
+    η_type::Symbol   # :polytropic or :isentropic
     map::Union{PerformanceMap, Nothing}
     mode::Symbol
     N_shaft::Float64 # [rpm] — set by Shaft
@@ -35,11 +40,14 @@ end
 function Turbine(name::String;
                  PR      = 2.0,
                  η_poly   = 0.90,
+                 η_type::Symbol = :polytropic,
                  map::Union{PerformanceMap,Nothing} = nothing,
                  mode::Symbol = :design,
                  P_exit   = 101325.0)
+    η_type in (:polytropic, :isentropic) ||
+        error("Turbine \"$name\": η_type must be :polytropic or :isentropic, got :$η_type")
     T = promote_type(typeof(PR), typeof(η_poly), typeof(P_exit))
-    Turbine{T}(name, T(PR), T(η_poly), map, mode, 0.0, T(P_exit), nothing, nothing, 0.0)
+    Turbine{T}(name, T(PR), T(η_poly), η_type, map, mode, 0.0, T(P_exit), nothing, nothing, 0.0)
 end
 
 function compute!(el::Turbine, inlet::Port)::Port
@@ -65,7 +73,7 @@ function compute!(el::Turbine, inlet::Port)::Port
 
     fp     = s.fluid
     Pt_out = s.Pt / PR_eff
-    Tt_out = _polytropic_outlet(fp, s.Tt, s.Pt, Pt_out, el.η_poly)
+    Tt_out = _efficiency_outlet(el.η_type, fp, s.Tt, s.Pt, Pt_out, el.η_poly)
 
     outlet_state = update(s; Pt = Pt_out, Tt = Tt_out)
     el.outlet = Port(outlet_state)

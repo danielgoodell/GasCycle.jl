@@ -136,9 +136,10 @@ _describe(el::Mixer)      = ""
 
 function _describe(el::Union{Compressor,Turbine})
     isnothing(el.inlet) && return "(not computed)"
-    P_kW = _scalar(specific_work(el) * el.inlet[].W) / 1e3
-    str  = @sprintf("PR=%.4f  ηp=%.4f  P=%.2f kW",
-                    _scalar(pressure_ratio(el)), _scalar(el.η_poly), P_kW)
+    P_kW  = _scalar(specific_work(el) * el.inlet[].W) / 1e3
+    η_lbl = el.η_type == :isentropic ? "ηad" : "ηp"
+    str   = @sprintf("PR=%.4f  %s=%.4f  P=%.2f kW",
+                     _scalar(pressure_ratio(el)), η_lbl, _scalar(el.η_poly), P_kW)
     if el.mode == :off_design
         s = el.inlet[]
         str *= @sprintf("  Wc=%.4f  Nc=%.1f", el.Wc_map,

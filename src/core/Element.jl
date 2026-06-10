@@ -58,6 +58,32 @@ function _polytropic_outlet(fp::FluidProperties, Tt_in, Pt_in, Pt_out, η_p; N=2
     T
 end
 
+"""
+    _isentropic_outlet(fp, Tt_in, Pt_in, Pt_out, η_ad) -> Tt_out
+
+Outlet temperature using adiabatic (isentropic) efficiency semantics — the
+single-step counterpart of `_polytropic_outlet`, matching NPSS `effDes`:
+
+  Compression:  Δh_actual = Δh_is / η_ad
+  Expansion:    Δh_actual = Δh_is × η_ad
+
+with Δh_is evaluated for the full pressure change at constant inlet entropy.
+"""
+function _isentropic_outlet(fp::FluidProperties, Tt_in, Pt_in, Pt_out, η_ad)
+    compress = Pt_out > Pt_in
+    s_in  = entropy(fp, Tt_in, Pt_in)
+    h_in  = enthalpy(fp, Tt_in, Pt_in)
+    T_is  = T_from_s(fp, s_in, Pt_out; T_guess = Tt_in)
+    Δh_is = enthalpy(fp, T_is, Pt_out) - h_in
+    Δh    = compress ? Δh_is / η_ad : Δh_is * η_ad
+    T_from_h(fp, h_in + Δh, Pt_out; T_guess = T_is)
+end
+
+"""Dispatch on an element's efficiency semantics (`:polytropic` or `:isentropic`)."""
+_efficiency_outlet(η_type::Symbol, fp::FluidProperties, Tt_in, Pt_in, Pt_out, η) =
+    η_type == :isentropic ? _isentropic_outlet(fp, Tt_in, Pt_in, Pt_out, η) :
+                            _polytropic_outlet(fp, Tt_in, Pt_in, Pt_out, η)
+
 function compute!(el::AbstractElement, inlet::Port)
     error("compute! not implemented for $(typeof(el))")
 end
