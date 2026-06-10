@@ -51,8 +51,11 @@ const _LBM_FT3_TO_KG_M3  = 16.01846          # lbm/ft³ → kg/m³
 struct FPTFluid <: FluidProperties
     name::String
     bounds::Symbol  # :error, :warn, or :clamp for out-of-table T/P lookups
+    s_interp::Symbol  # :log_pressure (detrended, default) or :linear (legacy/NPSS-compat)
+    R_s::Float64      # gas constant fitted from the s table [J/(kg·K)] (:log_pressure)
+    P_ref::Float64    # detrending reference pressure [Pa]
     itp_h::Any      # h(Pt, Tt)  [J/kg]
-    itp_s::Any      # s(Pt, Tt)  [J/(kg·K)]
+    itp_s::Any      # s(Pt, Tt) [J/(kg·K)], or detrended σ = s + R_s·ln(Pt/P_ref)
     itp_cp::Any     # cp(Pt, Tt) [J/(kg·K)]
     itp_gam::Any    # γ(Pt, Tt)  [-]
     itp_rho::Any    # ρ(Pt, Tt)  [kg/m³]
@@ -211,7 +214,24 @@ function _build_itp(Pt_vals, inner_arr, out_arr,
 end
 
 """
-    FPTFluid(path; bounds=:error) -> FPTFluid
+    _fit_R_from_s(Pt_axis, s_data) -> R [J/(kg·K)]
+
+Fit the specific gas constant from the s table itself: for an (ideal or
+mildly real) gas, s(T, P) = f(T) − R·ln(P/P_ref), so every adjacent-Pt node
+pair at fixed T gives R ≈ −Δs/Δln(Pt).  Take the median over all pairs —
+robust to real-gas content in any corner of the table.
+"""
+function _fit_R_from_s(Pt_axis::Vector{Float64}, s_data::Matrix{Float64})
+    slopes = Float64[]
+    for i in 1:length(Pt_axis)-1, j in axes(s_data, 2)
+        push!(slopes, -(s_data[i+1, j] - s_data[i, j]) / log(Pt_axis[i+1] / Pt_axis[i]))
+    end
+    sort!(slopes)
+    slopes[(length(slopes) + 1) ÷ 2]
+end
+
+"""
+    FPTFluid(path; bounds=:error, s_interp=:log_pressure) -> FPTFluid
 
 Load a fluid property table from an NPSS FPT file.
 
@@ -219,10 +239,23 @@ Load a fluid property table from an NPSS FPT file.
 - `:error` throws an informative error immediately (default)
 - `:warn` clamps to the table bounds and warns
 - `:clamp` clamps silently, matching the legacy behavior
+
+`s_interp` controls how entropy is interpolated between pressure nodes:
+- `:log_pressure` (default) — interpolate the pressure-detrended entropy
+  σ = s + R·ln(Pt/P_ref) and restore the −R·ln(Pt/P_ref) term analytically
+  (R fitted from the table).  Exact in P for an ideal gas; removes the
+  large mid-cell ∂s/∂P error of linear-in-P interpolation on coarse Pt
+  grids (~14 % for HeXe84.fpt at the BRU compressor inlet, which showed up
+  as +14 °R on the compressor outlet — see validation/PLAN.md, rung 0).
+- `:linear` — legacy bilinear-in-P behavior, kept for apples-to-apples
+  comparison with table interpolators that are linear in P (e.g. NPSS).
 """
-function FPTFluid(path::String; bounds::Symbol = :error)
+function FPTFluid(path::String; bounds::Symbol = :error,
+                  s_interp::Symbol = :log_pressure)
     bounds in (:error, :warn, :clamp) ||
         error("FPTFluid: bounds must be :error, :warn, or :clamp, got :$bounds")
+    s_interp in (:log_pressure, :linear) ||
+        error("FPTFluid: s_interp must be :log_pressure or :linear, got :$s_interp")
 
     content = read(path, String)
     name    = splitext(basename(path))[1]
@@ -238,10 +271,34 @@ function FPTFluid(path::String; bounds::Symbol = :error)
     end
 
     itp_h   = get_itp("h_T", _PSIA_TO_PA, _R_TO_K, _BTU_LBM_TO_J_KG)
-    itp_s   = get_itp("s_T", _PSIA_TO_PA, _R_TO_K, _BTU_LBM_R_TO_SI)
     itp_cp  = get_itp("Cp",  _PSIA_TO_PA, _R_TO_K, _BTU_LBM_R_TO_SI)
     itp_gam = get_itp("gam", _PSIA_TO_PA, _R_TO_K, 1.0)
     itp_rho = get_itp("rho", _PSIA_TO_PA, _R_TO_K, _LBM_FT3_TO_KG_M3)
+
+    # Entropy: optionally interpolate the pressure-detrended σ = s + R·ln(Pt/P_ref)
+    itp_s = nothing
+    R_s   = 0.0
+    P_ref = 1.0
+    if haskey(tables, "s_T") && !isempty(tables["s_T"][1])
+        Pt_vals, inner_arr, out_arr = tables["s_T"]
+        nPt = length(Pt_vals)
+        nIn = length(inner_arr[1])
+        s_data = Matrix{Float64}(undef, nPt, nIn)
+        for i in 1:nPt
+            length(out_arr[i]) == nIn ||
+                error("FPTFluid: inconsistent row length at Pt index $i")
+            @. s_data[i, :] = out_arr[i] * _BTU_LBM_R_TO_SI
+        end
+        Pt_axis = Pt_vals .* _PSIA_TO_PA
+        if s_interp == :log_pressure
+            P_ref = Pt_axis[1]
+            R_s   = _fit_R_from_s(Pt_axis, s_data)
+            for i in 1:nPt
+                @. s_data[i, :] += R_s * log(Pt_axis[i] / P_ref)
+            end
+        end
+        itp_s = interpolate((Pt_axis, inner_arr[1] .* _R_TO_K), s_data, Gridded(Linear()))
+    end
 
     isnothing(itp_h)  && error("FPTFluid: required table 'h_T' not found in $path")
     isnothing(itp_s)  && error("FPTFluid: required table 's_T' not found in $path")
@@ -257,7 +314,7 @@ function FPTFluid(path::String; bounds::Symbol = :error)
     Pt_vals_SI = tables["h_T"][1] .* _PSIA_TO_PA
     Tt_vals_SI = tables["h_T"][2][1] .* _R_TO_K
 
-    FPTFluid(name, bounds,
+    FPTFluid(name, bounds, s_interp, R_s, P_ref,
              itp_h, itp_s, itp_cp, itp_gam, itp_rho,
              itp_Th, itp_Ts, itp_hs,
              minimum(Pt_vals_SI), maximum(Pt_vals_SI),
@@ -298,7 +355,8 @@ end
 
 function entropy(fp::FPTFluid, T, P)
     Pc, Tc = _clamp_PT(fp, T, P, :entropy)
-    fp.itp_s(Pc, Tc)
+    s = fp.itp_s(Pc, Tc)
+    fp.s_interp == :log_pressure ? s - fp.R_s * log(Pc / fp.P_ref) : s
 end
 
 function density(fp::FPTFluid, T, P)

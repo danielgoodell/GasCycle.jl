@@ -80,7 +80,8 @@ T_bleed_out = R_to_K(559.0)          # BRU3.mdl: Bld.setTotalTP(459+100, Bld.Pt)
 # ── Build network ───────────────────────────────────────────────────────────────
 net = FlowNetwork()
 
-comp    = Compressor("Comp";   PR=PR_comp,   η_poly=η_comp)
+# η_type=:isentropic matches NPSS effDes semantics (BRU3.mdl)
+comp    = Compressor("Comp";   PR=PR_comp,   η_poly=η_comp, η_type=:isentropic)
 bsplit  = Splitter("BldSplit"; fracs=[1.0 - frac_bleed, frac_bleed])
 recup   = HeatExchanger("Recup"; ε=ε_recup,
                                   dPqP_hot=dPqP_recup_hot,
@@ -88,7 +89,8 @@ recup   = HeatExchanger("Recup"; ε=ε_recup,
 bcool   = HeatSource("BldCool"; TtExit=T_bleed_out, mode=:fixed_TtExit)
 heater  = HeatSource("Heater"; TtExit=T_turb_in, dPqP=dPqP_heatsrc)
 bmix    = Mixer("BldMix")
-turb    = Turbine("Turb"; mode=:pressure_closure, P_exit=P_turb_exit, η_poly=η_turb)
+turb    = Turbine("Turb"; mode=:pressure_closure, P_exit=P_turb_exit, η_poly=η_turb,
+                          η_type=:isentropic)
 shaft   = Shaft("Shaft"; N=36000.0)
 
 # Main flow: comp → splitter → recup → heater → mixer → turb → (back to comp)

@@ -7,11 +7,11 @@ Designed as a clean, extensible reimplementation of the core NPSS cycle-analysis
 ## Features
 
 - **Closed Brayton cycle modeling** — compressor, turbine, recuperator, reactor heat source, ducts, bleed flows
-- **Real He-Xe fluid properties** via NPSS FPT (Fluid Property Table) files — bicubic interpolation on T-P grids, or a fast ideal-gas backend for development
+- **Real He-Xe fluid properties** via NPSS FPT (Fluid Property Table) files — bilinear interpolation on T-P grids, or a fast ideal-gas backend for development
 - **Exact design derivatives** via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) — parametric element types (`Compressor{T<:Real}`, etc.) propagate Dual numbers through the full cycle
 - **Newton solver** via [NonlinearSolve.jl](https://github.com/SciML/NonlinearSolve.jl) — replaces fixed-point iteration for recuperator back-edges; inner `AutoForwardDiff` Jacobian lets outer ForwardDiff thread through correctly for implicit differentiation
 - **Compressor bleeds** — `Splitter` / `Mixer` elements handle bearing-cooling bleeds, seal flows, or any branch topology
-- **Performance maps** — bilinear/bicubic interpolation on corrected speed/flow grids with design-point scaling
+- **Performance maps** — bilinear interpolation on corrected speed/flow grids with design-point scaling
 
 ## Quick start
 
@@ -73,13 +73,13 @@ The `examples/bru_10kw.jl` model reproduces the NASA Brayton Rotating Unit (BRU,
 
 | Quantity | GasCycle | NPSS / paper |
 |---|---|---|
-| Compressor outlet T | 422 K (759 °R) | 409 K (737 °R) |
-| Turbine outlet T | 914 K (1645 °R) | 945 K (1701 °R) |
+| Compressor outlet T | 409.5 K (737.0 °R) | 409 K (≈737 °R) |
+| Turbine outlet T | 930 K (1673 °R) | 945 K (1701 °R, no-bleed tear value) |
 | Turbine PR | 1.758 | ~1.75 |
-| Net shaft power | 13.6 kW | ~13.4 kW |
-| Est. electrical output | 11.1 kW | 10.5 kW design |
+| Net shaft power | 13.1 kW | ~13.4 kW (HPX; hp-vs-kW pending) |
+| Est. electrical output | 10.6 kW | 10.5 kW design |
 
-Both models use the same HeXe84.fpt fluid table. GasCycle implements true polytropic efficiency (N=20 step numerical integration of dh = v dP / η_p). The NPSS BRU model appears to use isentropic efficiency semantics with the same η=0.80 value — for ideal-gas He-Xe at PR=1.9, isentropic η=0.80 gives ~410 K and polytropic η_p=0.80 gives ~414 K, consistent with the observed offset. The remaining gap is FPT interpolation differences (GasCycle bicubic B-spline vs. NPSS's scheme). Net power agrees to within ~1.5%.
+The example uses `η_type=:isentropic` to match NPSS `effDes` semantics. The compressor outlet matches NPSS at print precision after fixing an entropy-interpolation artifact in the FPT reader (linear-in-P interpolation of s ∝ −R·ln P distorted ∂s/∂P by 14% mid-cell; `FPTFluid` now interpolates pressure-detrended entropy by default). The remaining turbine-outlet gap traces to BRU3.mdl pinning its loop tear at the *no-bleed* isolated turbine output (1701 °R, which GasCycle reproduces to 0.2 °R in isolation) while also injecting 2% cooled bleed at the turbine inlet — an inconsistency the .mdl itself flags. Full attribution ledger and the campaign to reach solver-precision agreement: `validation/PLAN.md` and `validation/RESULTS.md`.
 
 ## Architecture
 
@@ -87,7 +87,7 @@ Both models use the same HeXe84.fpt fluid table. GasCycle implements true polytr
 src/
 ├── thermo/
 │   ├── FluidProperties.jl   # abstract interface: enthalpy, entropy, cp, density, γ
-│   ├── FPTFluid.jl          # NPSS FPT file reader + bicubic interpolation
+│   ├── FPTFluid.jl          # NPSS FPT file reader + bilinear interpolation
 │   └── IdealGasFluid.jl     # constant-Cp ideal gas (exact closed-form inversions)
 ├── core/
 │   ├── FluidState.jl        # FluidState{T<:Real}: Pt, Tt, W, fluid

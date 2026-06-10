@@ -53,7 +53,18 @@ Fix (NPSS-style formulation):
   cycle 2060→1236 °R at 36 krpm (21/21 converged, design power reproduced,
   self-sustain threshold near 1330 °R).
 
-### 4. Direct noble-gas property module  ← NEXT (waiting on collaborator's Python)
+### 3b. NPSS cross-validation campaign (BRU3.mdl)  ← NEXT (added 2026-06-10)
+Validate GasCycle against the identical NPSS model to solver precision, or
+attribute every difference exactly. Full plan in `validation/PLAN.md` —
+precision ladder (property lookups → element isolation → full loop with
+NPSS's actual constraint set → factor attribution), the six known
+confounders (fluid table CEAT vs HeXe84, effDes isentropic semantics,
+BRU3.mdl's tear-based solver setup with floating TIT and turbine PR,
+interpolation, bleed mixing rules, HPX units), and the NPSS-side artifacts
+needed from the collaborator. Rung-1 GasCycle harness:
+`validation/bru3_isolation.jl`.
+
+### 4. Direct noble-gas property module  (waiting on collaborator's Python)
 Replace the FPT-table dependency with a native property backend. ON HOLD
 (2026-06-09) until Daniel obtains the collaborator's FPT-generation Python —
 plan is to three-way compare code vs. papers vs. FPT output and resolve any

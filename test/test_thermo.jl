@@ -107,5 +107,38 @@ end
               GasCycle.cp(fl_clamp, fl_clamp.Tt_max, P_test)
 
         @test_throws ErrorException FPTFluid(fpt_path; bounds=:extrapolate)
+
+        # ── Entropy pressure-interpolation (validation/PLAN.md rung 0) ──────
+        # s ≈ f(T) − R·ln P, so linear-in-P interpolation overshoots ∂s/∂lnP
+        # mid-cell on the coarse Pt grid (~14 % at the BRU compressor inlet,
+        # ⇒ +14 °R on the compressor outlet).  The default :log_pressure mode
+        # detrends the log term and must recover ∂s/∂lnP ≈ −R everywhere.
+        R_HeXe84 = 8314.46 / 83.8
+        @test fl.s_interp == :log_pressure
+        @test fl.R_s ≈ R_HeXe84 rtol = 0.005   # fitted from the table itself
+
+        # Mid-cell pressure derivative (163 kPa sits between the 101.6 and
+        # 198.2 kPa nodes — the worst case that produced the BRU offset)
+        dsdlnP = (entropy(fl, 300.0, 180e3) - entropy(fl, 300.0, 150e3)) /
+                 log(180 / 150)
+        @test dsdlnP ≈ -R_HeXe84 rtol = 0.01
+
+        fl_lin = FPTFluid(fpt_path; s_interp = :linear)
+        dsdlnP_lin = (entropy(fl_lin, 300.0, 180e3) - entropy(fl_lin, 300.0, 150e3)) /
+                     log(180 / 150)
+        @test abs(dsdlnP_lin) > 1.1 * R_HeXe84   # legacy artifact, kept for NPSS-compat
+
+        # Table-node values are mode-independent (detrend is exact at nodes)
+        P_node = fl.itp_s.knots[1][3]
+        @test entropy(fl, 900.0, P_node) ≈ entropy(fl_lin, 900.0, P_node) rtol = 1e-12
+
+        # Isentropic step at the BRU compressor state now implies a physical
+        # exponent consistent with the table's own γ (was γ_eff ≈ 1.74)
+        s_bru = entropy(fl, 300.0, 163.4e3)
+        T2s   = T_from_s(fl, s_bru, 310.5e3; T_guess = 380.0)
+        γ_eff = 1 / (1 - log(T2s / 300.0) / log(310.5 / 163.4))
+        @test γ_eff ≈ gamma(fl, 300.0, 163.4e3) rtol = 0.005
+
+        @test_throws ErrorException FPTFluid(fpt_path; s_interp = :cubic)
     end
 end
