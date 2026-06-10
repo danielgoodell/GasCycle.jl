@@ -119,6 +119,79 @@ Implement a `ThermallyPerfectGas` backend:
 - Air as a fixed-composition pseudo-species (standard dry air), N₂ and CO₂
   as pure species.
 
+## Capability expansion (added 2026-06-09)
+
+Priority driver: mission needs (SR-1 Freedom) put **off-design fidelity,
+inventory control, and slow transients** at the top of the physics track.
+The convenience batch is cheap and can be interleaved anytime.
+
+### 6. Cold-end physics: Cooler / Radiator element
+There is currently no heat-rejection element — loop closure leans on
+`set_state!` pinning the compressor inlet. Add a `Cooler` (ground test:
+water-cooled HX with ε or UA) and `Radiator` (space: T⁴ rejection with area
+and sink temperature) so compressor inlet temperature responds to the
+operating point. Prerequisite for meaningful off-design and transients.
+
+### 7. Inventory control and per-component volume bookkeeping
+Real CBC power control is charge-pressure (inventory) control. Plan:
+- Make loop inventory (total gas mass/moles) a model quantity: assign a
+  volume to every component; where components are currently joined
+  directly, connecting ducts may need to be added as the volume holders.
+- Steady-state inventory mode: loop mass W becomes a solver independent
+  with a pressure-closure residual (replaces the fixed-seed-Pt assumption;
+  resolves the dangling-pressure caveat from the off-design TIT sweep).
+- Mass accounting in components with large T/P gradients is the hard part:
+  m = ∫ρ dV over a strong axial temperature gradient (recuperator!) is not
+  well-approximated by inlet/outlet averages. Use segmented volumes or an
+  analytic mean density per component (e.g., ideal-gas with linear-T duct
+  has closed-form m = PV/(R·T_lm) using log-mean temperature); validate
+  segment-count convergence.
+- Sets up transients: volume + mass state per component is exactly the
+  capacitance structure the transient extension needs.
+
+### 8. Off-design recuperator effectiveness (ε-NTU from scaled UA)
+ε is currently a fixed parameter; physically it varies as flows and
+properties deviate from design. Compute ε from NTU with UA scaled from the
+design point (UA ∝ ṁ^0.8-type scaling or Colburn-based). Fold in the
+enthalpy-based energy balance from the backlog. Highest realism-per-effort
+in the physics track since recuperator performance dominates cycle η.
+
+### 9. Transients — shaft dynamics first, then thermal
+The original mission of this architecture (reactor coupling). Stage it:
+- Shaft speed dynamics: I·ω·dω/dt = unbalanced shaft power. The power-
+  balance machinery already computes the imbalance; startup, load-step,
+  and loss-of-load events become solvable with just shaft inertia.
+- Slow thermal transients: thermal capacitance (metal + gas) per component
+  using the volumes from item 7, wrapped with DifferentialEquations.jl.
+  Reactor side couples here (point kinetics or supplied Q(t)).
+
+### 10. Convenience batch (cheap, interleave anytime)
+- `summary(sol)`: NPSS-style station table (Tt/Pt/W/h at every port,
+  work/heat/η per component) — replaces hand-rolled println blocks.
+- NPSS `.map` file reader for real performance maps.
+- Plot recipes: T-s diagram, operating points on map contours, sweeps.
+- Exported unit helpers (R↔K, psia↔Pa, lbm/s↔kg/s) — every example
+  currently redefines them.
+- CI workflow (GitHub Actions) — `Pkg.test()` already works.
+
+### 11. Optimization showcase
+The never-built verification item 6 from the original plan: maximize cycle
+η over (PR, ε, mixture MW) with ForwardDiff + Optim.jl. Cheap once the
+ideal-gas path is the backend, and it is the demonstration of why this
+tool beats NPSS (exact gradients).
+
+### 12. OTAC-style meanline turbomachinery
+Geometry-based component models instead of scaled generic maps, à la
+OTAC (Jones, NASA Glenn). Scope notes:
+- Space Brayton machines are radial: use NASA Glenn radial correlations
+  (Galvas for centrifugal compressors; Glassman/Wasserbauer/Rohlik for
+  radial-inflow turbines) rather than general axial meanline.
+- Pragmatic first step: a meanline *design* tool that generates a map
+  from geometry once, consumed by the existing map machinery — most of
+  the value without velocity triangles inside every Newton iteration.
+- Full OTAC-equivalent (meanline inside the solve) and AD-through-geometry
+  sensitivities come after.
+
 ### Backlog (lower priority)
 - **FPT AD via implicit-function rule** (deferred with trigger): dT = dh/cp
   on the bisection inversions is ~half a day, but gradients through
