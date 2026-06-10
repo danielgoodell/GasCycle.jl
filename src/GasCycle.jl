@@ -31,6 +31,9 @@ include("elements/Mixer.jl")
 include("network/FlowNetwork.jl")
 include("solver/Solver.jl")
 
+# ── Output ────────────────────────────────────────────────────────────────────
+include("output/Summary.jl")
+
 # ── Public API ────────────────────────────────────────────────────────────────
 export R_to_K, K_to_R, psia_to_Pa, Pa_to_psia
 export lbm_to_kg, kg_to_lbm, lbps_to_kgps, kgps_to_lbps
@@ -55,5 +58,6 @@ export link!
 
 export FlowNetwork, add!, connect!, connect_port!, add_shaft!, add_hx_pair!, set_state!, one_pass!
 export solve!, cycle_efficiency, net_power, SolveResult
+export stations   # summary(sol) extends Base.summary — no export needed
 
 end # module GasCycle

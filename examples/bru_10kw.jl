@@ -108,6 +108,10 @@ set_state!(net, comp; Pt=P_comp_in, Tt=T_comp_in, W=W_flow, fluid=fluid)
 # ── Solve ───────────────────────────────────────────────────────────────────────
 sol = solve!(net; verbose=true)
 
+# NPSS-style station/component report
+println()
+summary(sol)
+
 # ── Results ─────────────────────────────────────────────────────────────────────
 println("\n=== BRU 10 kW Design Point Results ===\n")
 
