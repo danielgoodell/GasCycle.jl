@@ -40,10 +40,7 @@ fpt_path = joinpath(@__DIR__, "..", "HeXe84.fpt")
 fluid = FPTFluid(fpt_path)   # M = 83.8 g/mol, matches BRU design spec
 println("Fluid: $(fluid.name)  (M ≈ 83.8 g/mol)")
 
-# ── Unit conversions ──────────────────────────────────────────────────────────
-R_to_K(T_R)    = T_R * (5/9)          # Rankine → Kelvin
-psia_to_Pa(P)  = P * 6894.757         # psia → Pa
-lbps_to_kgps(W) = W * 0.453592        # lb/s → kg/s
+# Unit conversions (R_to_K, psia_to_Pa, lbps_to_kgps, …) are exported by GasCycle.
 
 # ── Design parameters (from NASA TN D-5815 and BRU3.mdl) ──────────────────────
 T_comp_in = R_to_K(540.0)       # 300 K

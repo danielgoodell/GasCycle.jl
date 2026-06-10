@@ -25,11 +25,7 @@ using GasCycle
 fpt_path = joinpath(@__DIR__, "..", "HeXe84.fpt")
 fluid    = FPTFluid(fpt_path)
 
-# ── Unit helpers ──────────────────────────────────────────────────────────────
-R_to_K(T_R)     = T_R * (5/9)
-psia_to_Pa(P)   = P * 6894.757
-lbps_to_kgps(W) = W * 0.453592
-K_to_R(T_K)     = T_K * (9/5)
+# Unit helpers (R_to_K, K_to_R, psia_to_Pa, lbps_to_kgps, …) are exported by GasCycle.
 
 # ── Fixed design parameters (same as bru_tit_sweep.jl) ────────────────────────
 T_comp_in = R_to_K(540.0)

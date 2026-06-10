@@ -1,5 +1,8 @@
 module GasCycle
 
+# ── Units ─────────────────────────────────────────────────────────────────────
+include("units.jl")
+
 # ── Thermodynamics ────────────────────────────────────────────────────────────
 include("thermo/FluidProperties.jl")
 include("thermo/IdealGasFluid.jl")
@@ -29,6 +32,12 @@ include("network/FlowNetwork.jl")
 include("solver/Solver.jl")
 
 # ── Public API ────────────────────────────────────────────────────────────────
+export R_to_K, K_to_R, psia_to_Pa, Pa_to_psia
+export lbm_to_kg, kg_to_lbm, lbps_to_kgps, kgps_to_lbps
+export btulbm_to_Jkg, Jkg_to_btulbm, btulbmR_to_JkgK, JkgK_to_btulbmR
+export lbmft3_to_kgm3, kgm3_to_lbmft3, rpm_to_radps, radps_to_rpm
+export hp_to_W, W_to_hp
+
 export FluidProperties, IdealGasFluid, HeXeIdealGas, FPTFluid
 # Note: `cp` is not exported to avoid conflict with Base.Filesystem.cp in Julia ≥ 1.12.
 # Use GasCycle.cp(...) or `import GasCycle: cp` to access it.
