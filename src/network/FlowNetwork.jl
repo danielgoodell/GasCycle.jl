@@ -53,10 +53,12 @@ mutable struct FlowNetwork
     shafts::Vector{Shaft}
     seed_el::Int                       # element whose primary inlet is seeded
     seed_state::Union{FluidState,Nothing}
+    boundaries::Vector{Tuple{Int,Symbol,FluidState}}  # extra boundary-stream inlets
     plan::Union{_FlowPlan,Nothing}
 end
 
-FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing, nothing)
+FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing,
+                            Tuple{Int,Symbol,FluidState}[], nothing)
 
 _invalidate_plan!(net::FlowNetwork) = (net.plan = nothing)
 
@@ -323,6 +325,22 @@ function set_state!(net::FlowNetwork, first_element::AbstractElement;
     net.seed_state = FluidState(Pt, Tt, W, fluid)
 end
 
+"""
+    set_boundary!(net, el, port; Pt, Tt, W, fluid)
+
+Impose a fixed boundary-stream state on an inlet port that has no upstream
+element — e.g. the coolant side of a heat-rejection exchanger, where the
+other loop is not modeled.  May be called for multiple ports.  Calling it
+again for the same `(el, port)` replaces the previous state.
+"""
+function set_boundary!(net::FlowNetwork, el::AbstractElement, port::Symbol;
+                       Pt, Tt, W, fluid::FluidProperties)
+    idx = _el_idx(net, el)
+    filter!(b -> !(b[1] == idx && b[2] == port), net.boundaries)
+    push!(net.boundaries, (idx, port, FluidState(Pt, Tt, W, fluid)))
+    nothing
+end
+
 # ── one_pass! ─────────────────────────────────────────────────────────────────
 
 """
@@ -347,6 +365,11 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
 
     # Seed the initial element's inlet
     _store_available!(avail, net, net.seed_el, :inlet, Port(net.seed_state))
+
+    # Seed boundary-stream inlets (fixed states with no upstream element)
+    for (el_idx, port, state) in net.boundaries
+        _store_available!(avail, net, el_idx, port, Port(state))
+    end
 
     # Pre-seed back-edge inlets
     be_idx = 0

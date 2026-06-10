@@ -29,7 +29,8 @@ function _port_matches(el::AbstractElement, edge_port::Symbol, exitp::Symbol)
 end
 
 _port_suffix(port::Symbol) = port == :outlet ? "out" :
-                             replace(string(port), "outlet" => "out")
+                             port == :inlet  ? "in"  :
+                             replace(string(port), "outlet" => "out", "inlet" => "in")
 
 """Canonical name for an outlet port (resolves the HX `:outlet` alias)."""
 _normal_out(el::AbstractElement, port::Symbol) = port
@@ -106,6 +107,25 @@ function _station_paths(net::FlowNetwork; branches::Bool = true)
             push!(sts, "$(el.name).$(_port_suffix(np))" => out[])
             push!(emitted, (edge.src, np))
             edge.dst in visited || walk!(edge.dst, edge.dst_port, false)
+        end
+
+        # Boundary streams (set_boundary!) and their dangling outlet ports —
+        # e.g. the coolant side of a heat-rejection exchanger.
+        for (el_idx, port, state) in net.boundaries
+            el = net.elements[el_idx]
+            push!(sts, "$(el.name).$(_port_suffix(port))" => state)
+        end
+        for el_idx in sort(collect(visited))
+            el = net.elements[el_idx]
+            for port in network_outlets(el)
+                np = _normal_out(el, port)
+                np == port || continue        # skip aliases (HX :outlet)
+                (el_idx, np) in emitted && continue
+                out = _get_outlet(el, np)
+                isnothing(out) && continue
+                push!(sts, "$(el.name).$(_port_suffix(np))" => out[])
+                push!(emitted, (el_idx, np))
+            end
         end
     end
 

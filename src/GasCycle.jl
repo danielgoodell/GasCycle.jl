@@ -59,7 +59,7 @@ export compute!, compute_hx!, specific_work, pressure_ratio, Q_transferred, powe
 export n_residuals, residuals, indep_vars, set_indep_vars!
 export link!
 
-export FlowNetwork, add!, connect!, connect_port!, add_shaft!, add_hx_pair!, set_state!, one_pass!
+export FlowNetwork, add!, connect!, connect_port!, add_shaft!, add_hx_pair!, set_state!, set_boundary!, one_pass!
 export solve!, cycle_efficiency, net_power, SolveResult
 export stations   # summary(sol) extends Base.summary — no export needed
 export tsdiagram, tsdiagram!, mapplot, mapplot!   # RecipesBase user plots
