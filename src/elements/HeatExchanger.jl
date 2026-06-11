@@ -17,6 +17,17 @@ Effectiveness comes from one of two modes:
                    responds to off-design flow and property changes.
                    Selected automatically when the `UA` keyword is given.
 
+NPSS compatibility note:
+  NPSS's HeatExchanger `effect` convention uses stream capacity rates:
+  `Q = effect * C_min * (T_hot,in - T_cold,in)`, with outlet temperatures
+  updated by `Q / C_stream`.  This differs from the endpoint enthalpy-limit
+  definition used here when properties vary or when an FPT `Cp` table is not
+  exactly the derivative/average slope of the `h_T` table.  In the BRU
+  HeatSinkHx validation case, NPSS's reported `effect = 0.946` audits as
+  ε ≈ 0.940 on this model's enthalpy basis, while the recuperator matched its
+  nominal ε.  Keep that in mind when reproducing NPSS results exactly; this
+  model's fixed effectiveness is defined as Q_actual / Q_max_enthalpy.
+
 Both streams conserve mass flow; only Tt changes (pressure loss dPqP applied
 to each stream independently).
 
