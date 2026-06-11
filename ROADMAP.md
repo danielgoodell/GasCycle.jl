@@ -73,11 +73,17 @@ interpolation, bleed mixing rules, HPX units), and the NPSS-side artifacts
 needed from the collaborator. Rung-1 GasCycle harness:
 `validation/bru3_isolation.jl`.
 
-### 4. Direct noble-gas property module  (waiting on collaborator's Python)
-Replace the FPT-table dependency with a native property backend. ON HOLD
-(2026-06-09) until Daniel obtains the collaborator's FPT-generation Python —
-plan is to three-way compare code vs. papers vs. FPT output and resolve any
-discrepancies before implementing.
+### 4. Direct noble-gas property module  ✅ DONE (6a13300 thermo, 0be1816 transport)
+Replace the FPT-table dependency with a native property backend.
+Implemented 2026-06-10/11 directly from the papers (the earlier hold for
+the collaborator's FPT-generation Python proved unnecessary — the FPT
+table itself plus the papers' own spot values and Taylor's experimental
+Prandtl data were sufficient oracles; mixture Pr matches experiment to
+≤1.1%).  Inversions Newton-optimized (0287b75): scalar calls
+allocation-free, full design solve ~1.4 ms vs ~0.3 ms FPT — accepted as
+the price of table-free flexibility (see
+`src/thermo/NobleGasMixture_perf_notes.md`; bundled state API is the
+remaining lever if it ever matters).
 
 Design note: implement as a general `NobleGasMixture(gas1, gas2, x1)`, not
 hard-coded He-Xe. The El-Genk paper's correlations cover all 5 noble gases
