@@ -52,6 +52,26 @@ function gamma(fp::FluidProperties, T, P)
 end
 
 """
+    viscosity(fp, T, P) -> dynamic viscosity μ [Pa·s]
+"""
+function viscosity(fp::FluidProperties, T, P)
+    error("viscosity not implemented for $(typeof(fp))")
+end
+
+"""
+    conductivity(fp, T, P) -> thermal conductivity k [W/(m·K)]
+"""
+function conductivity(fp::FluidProperties, T, P)
+    error("conductivity not implemented for $(typeof(fp))")
+end
+
+"""
+    prandtl(fp, T, P) -> Prandtl number cp·μ/k [-]
+"""
+prandtl(fp::FluidProperties, T, P) =
+    cp(fp, T, P) * viscosity(fp, T, P) / conductivity(fp, T, P)
+
+"""
     T_from_h(fp, h_target, P; T_guess) -> T [K]
 
 Invert enthalpy: find T such that enthalpy(fp, T, P) ≈ h_target.

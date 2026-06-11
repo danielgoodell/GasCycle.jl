@@ -53,20 +53,51 @@ struct NobleGas
     Tμ::Float64    # [K]
     nμ::Float64
     Δμcr::Float64  # excess viscosity at the critical point [Pa·s] (NaN: none)
+    λcr::Float64   # critical-point thermal conductivity [W/(m·K)]
 end
 
 const _Rg = 8.31441   # J/(mol·K), the paper's value
 
 const HELIUM  = NobleGas("He", 0.004003,   5.2, 0.2275e6,  69.64, 2.576e-10,  10.22,
-                         3.0629e-7, -21.33, 0.7243,   NaN)
+                         3.0629e-7, -21.33, 0.7243,   NaN,     34.32e-3)
 const NEON    = NobleGas("Ne", 0.020179,  44.5, 2.678e6,  481.9,  2.789e-10,  35.7,
-                         8.4528e-7,  16.47, 0.642584, 8.9e-6)
+                         8.4528e-7,  16.47, 0.642584, 8.9e-6,  35.47e-3)
 const ARGON   = NobleGas("Ar", 0.039948, 150.7, 4.863e6,  535.6,  3.418e-10, 124.0,
-                         6.9891e-7,  65.70, 0.63977,  16.0e-6)
+                         6.9891e-7,  65.70, 0.63977,  16.0e-6, 28.223e-3)
 const KRYPTON = NobleGas("Kr", 0.0838,   209.5, 5.51e6,   908.4,  3.610e-10, 190.0,
-                         6.9629e-7,  71.07, 0.667,    23.3e-6)
+                         6.9629e-7,  71.07, 0.667,    23.3e-6, 19.828e-3)
 const XENON   = NobleGas("Xe", 0.13129,  289.7, 5.84e6,  1110.0,  4.055e-10, 229.0,
-                         7.5683e-7, 112.31, 0.655473, 29.7e-6)
+                         7.5683e-7, 112.31, 0.655473, 29.7e-6, 15.966e-3)
+
+# ── Pair interaction coefficients for transport (Tables 2-3) ─────────────────
+# μ₁₂(T) = Aμ·(T − Tμ)^n  (Eq. 32) and the λ₁₂ correction factor f₁₂ (Eq. 36).
+struct PairTransport
+    Aμ::Float64    # [Pa·s/K^n]
+    Tμ::Float64    # [K]
+    n::Float64
+    f::Float64     # f₁₂ of Eq. 36
+end
+
+const _PAIR_TRANSPORT = Dict(
+    ("He", "Ne") => PairTransport(8.81837e-7,  63.63, 0.614098, 0.895),
+    ("He", "Ar") => PairTransport(6.57562e-7,  51.87, 0.602712, 0.940),
+    ("He", "Kr") => PairTransport(11.2472e-7, 121.27, 0.508158, 1.020),
+    ("He", "Xe") => PairTransport(3.40998e-7,  45.89, 0.658754, 1.060),
+    ("Ne", "Ar") => PairTransport(10.4450e-7,  47.66, 0.620956, 0.845),
+    ("Ne", "Kr") => PairTransport(15.2944e-7,  94.86, 0.565158, 0.900),
+    ("Ne", "Xe") => PairTransport(18.2681e-7, 125.0,  0.522034, 0.940),
+    ("Ar", "Kr") => PairTransport(18.5326e-7, 148.93, 0.541593, 0.850),
+    ("Ar", "Xe") => PairTransport(16.9684e-7, 151.58, 0.542416, 0.935),
+    ("Kr", "Xe") => PairTransport(11.2303e-7, 116.71, 0.631571, 0.871),
+)
+
+function _pair_transport(g1::NobleGas, g2::NobleGas)
+    g1 === g2 && return PairTransport(g1.Aμ, g1.Tμ, g1.nμ, 1.0)
+    pt = get(_PAIR_TRANSPORT, (g1.name, g2.name), nothing)
+    isnothing(pt) && (pt = get(_PAIR_TRANSPORT, (g2.name, g1.name), nothing))
+    isnothing(pt) && error("no transport pair coefficients for $(g1.name)-$(g2.name)")
+    pt
+end
 
 _Vstar(g::NobleGas) = _Rg * g.Tcr / g.Pcr   # characteristic volume [m³/mol]
 
@@ -192,6 +223,7 @@ struct NobleGasMixture{X<:Real} <: FluidProperties
     x1::X
     M::X            # mixture molar mass [kg/mol]
     name::String
+    pair::PairTransport   # resolved once: Tables 2-3 lookup for transport
 end
 
 function NobleGasMixture(gas1::NobleGas, gas2::NobleGas, x1::Real;
@@ -199,7 +231,7 @@ function NobleGasMixture(gas1::NobleGas, gas2::NobleGas, x1::Real;
     0 <= ForwardDiff.value(x1) <= 1 ||
         error("NobleGasMixture: x1 must be in [0,1], got $x1")
     M = x1 * gas1.M + (1 - x1) * gas2.M                          # Eq. 22
-    NobleGasMixture(gas1, gas2, promote(x1, M)..., name)
+    NobleGasMixture(gas1, gas2, promote(x1, M)..., name, _pair_transport(gas1, gas2))
 end
 
 NobleGasFluid(gas::NobleGas) = NobleGasMixture(gas, gas, 1.0; name = gas.name)
@@ -208,7 +240,9 @@ NobleGasFluid(gas::NobleGas) = NobleGasMixture(gas, gas, 1.0; name = gas.name)
 function HeXe(M_molar::Real)
     M = M_molar * 1e-3
     x_He = (XENON.M - M) / (XENON.M - HELIUM.M)
-    NobleGasMixture(HELIUM, XENON, x_He; name = "HeXe$(round(M_molar, digits=1))")
+    # name from the primal value only, so M_molar may be a ForwardDiff Dual
+    name = "HeXe$(round(ForwardDiff.value(M_molar), digits = 1))"
+    NobleGasMixture(HELIUM, XENON, x_He; name)
 end
 
 """
@@ -355,3 +389,122 @@ function T_from_s(fp::NobleGasMixture, s_target, P; T_guess = 500.0)
     end
     T
 end
+
+# ── Transport: μ, k, Pr (Eqs. 2-7, 23-36) ────────────────────────────────────
+# Dilute baselines (Eqs. 3, 7) and the excess-property shape functions of
+# reduced density (Fig. 2 fit; Eq. 4):
+_μ0(g::NobleGas, T) = g.Aμ * (T - g.Tμ)^g.nμ
+_λ0(g::NobleGas, T) = 3.75 * (_Rg / g.M) * _μ0(g, T)
+_Ψμ(ρr) = ρr * (0.221 + ρr * (1.062 + ρr * (-0.509 + 0.225 * ρr)))
+_Ψλ(ρr) = ρr * (0.645 + ρr * (0.33 + ρr * (0.0368 - 0.0128 * ρr)))
+
+_μ12(pt::PairTransport, T) = pt.Aμ * (T - pt.Tμ)^pt.n            # Eq. 32
+
+const _Astar = 1.10   # A*₁₂ and B*₁₂: near-constant over CBC temperatures
+const _Bstar = 1.10   # (paper takes both as 1.10 throughout)
+
+"""Dilute mixture viscosity, Sutherland-Wassiljewa (Eqs. 30-31)."""
+function _μ0_mix(fp::NobleGasMixture, T)
+    g1, g2 = fp.gas1, fp.gas2
+    x1 = fp.x1
+    x2 = 1 - x1
+    μ1, μ2 = _μ0(g1, T), _μ0(g2, T)
+    μ12 = _μ12(fp.pair, T)
+    m1, m2 = g1.M, g2.M
+    mm  = 2 * m1 * m2 / (m1 + m2)^2
+    φ12 = (μ1 / μ12) * mm * (5 / (3 * _Astar) + m2 / m1)
+    φ21 = (μ2 / μ12) * mm * (5 / (3 * _Astar) + m1 / m2)
+    μ1 / (1 + φ12 * x2 / x1) + μ2 / (1 + φ21 * x1 / x2)
+end
+
+"""Dilute mixture conductivity, first-order Hirschfelder (Eqs. 34-36)."""
+function _λ0_mix(fp::NobleGasMixture, T)
+    g1, g2 = fp.gas1, fp.gas2
+    x1 = fp.x1
+    x2 = 1 - x1
+    λ1, λ2 = _λ0(g1, T), _λ0(g2, T)
+    m1, m2 = g1.M, g2.M
+    m12 = 2 * m1 * m2 / (m1 + m2)                                # harmonic-ish mean
+    λ12 = 3.75 * (_Rg / m12) * _μ12(fp.pair, T) * fp.pair.f      # Eq. 36
+    s   = (m1 + m2)^2 * _Astar
+    L11 = x1^2 / λ1 + x1 * x2 / (2λ12) *
+          (7.5 * m1^2 + 6.25 * m2^2 - 3 * m2^2 * _Bstar + 4 * m1 * m2 * _Astar) / s
+    L22 = x2^2 / λ2 + x1 * x2 / (2λ12) *
+          (7.5 * m2^2 + 6.25 * m1^2 - 3 * m1^2 * _Bstar + 4 * m1 * m2 * _Astar) / s
+    L12 = -x1 * x2 / (2λ12) * (m1 * m2 / s) * (55 / 4 - 3 * _Bstar - 4 * _Astar)
+    (x1^2 * L22 - 2 * x1 * x2 * L12 + x2^2 * L11) / (L11 * L22 - L12^2)
+end
+
+# Pseudo-critical mixing for the dense corrections.  ρr = 0.291·V*·ρ̂: with
+# Zc = 0.291, 0.291·V* is the (pseudo-)critical molar volume, so the Ψ
+# argument is ρ/ρcr.  Viscosity T* uses the linear rule (Eq. 24b); the
+# conductivity T* uses the van der Waals double sum (Eq. 26) with the
+# Eq. 20-21 cross terms.
+function _Vstar_mix(fp::NobleGasMixture)
+    fp.x1 * _Vstar(fp.gas1) + (1 - fp.x1) * _Vstar(fp.gas2)      # Eq. 24a/25
+end
+
+function _mustar(M, Tstar, Vstar)                                # Eq. 23b
+    0.204e-7 * sqrt(M * Tstar) / (0.291 * Vstar)^(2 / 3)
+end
+
+function _lamstar(M, Tstar, Vstar)                               # Eq. 33b
+    # SI throughout (M kg/mol, V* m³/mol): reproduces the Table 1 λcr
+    # column to its printed "λ*cr deviation" row for all five gases.
+    0.304e-4 * Tstar^0.277 / (M^0.465 * (0.291 * Vstar)^0.415)
+end
+
+"""Pure-gas viscosity (Eq. 2).  He's excess viscosity is nil (Table 1)."""
+function _viscosity_pure(fp::NobleGasMixture, g::NobleGas, T, P)
+    μ = _μ0(g, T)
+    isnan(g.Δμcr) && return μ + zero(_rhom(fp, T, P))   # keep type uniform
+    μ + g.Δμcr * _Ψμ(_rhom(fp, T, P) * g.M / g.ρcr)
+end
+
+"""Pure-gas conductivity (Eq. 6)."""
+function _conductivity_pure(fp::NobleGasMixture, g::NobleGas, T, P)
+    _λ0(g, T) + (1 - 1 / 2.94) * g.λcr * _Ψλ(_rhom(fp, T, P) * g.M / g.ρcr)
+end
+
+function viscosity(fp::NobleGasMixture, T, P)
+    g1, g2 = fp.gas1, fp.gas2
+    xv = ForwardDiff.value(fp.x1)
+    (g1 === g2 || xv == 1) && return _viscosity_pure(fp, g1, T, P)
+    xv == 0 && return _viscosity_pure(fp, g2, T, P)
+    μ0 = _μ0_mix(fp, T)
+    V  = _Vstar_mix(fp)
+    ρr = 0.291 * V * _rhom(fp, T, P)
+    if g1 === HELIUM || g2 === HELIUM
+        # Eq. 28: He contributes no excess viscosity (Eq. 27), so the dense
+        # correction is the heavy gas's μ*, weighted by its mole fraction.
+        heavy, xh = g1 === HELIUM ? (g2, 1 - fp.x1) : (g1, fp.x1)
+        μstar = _mustar(heavy.M, heavy.Tcr, _Vstar(heavy))
+        return μ0 + 0.565 * xh * μstar * _Ψμ(ρr)
+    end
+    # Eq. 23 with the Eq. 24 mixing rules
+    x1 = fp.x1
+    VT = x1 * _Vstar(g1) * g1.Tcr + (1 - x1) * _Vstar(g2) * g2.Tcr   # Eq. 24b
+    μ0 + 0.565 * _mustar(fp.M, VT / V, V) * _Ψμ(ρr)
+end
+
+function conductivity(fp::NobleGasMixture, T, P)
+    g1, g2 = fp.gas1, fp.gas2
+    xv = ForwardDiff.value(fp.x1)
+    (g1 === g2 || xv == 1) && return _conductivity_pure(fp, g1, T, P)
+    xv == 0 && return _conductivity_pure(fp, g2, T, P)
+    λ0 = _λ0_mix(fp, T)
+    x1 = fp.x1
+    x2 = 1 - x1
+    V  = _Vstar_mix(fp)
+    # Eq. 26 (van der Waals second rule) with Eq. 20-21 cross terms
+    V1, V2 = _Vstar(g1), _Vstar(g2)
+    V12 = 0.5 * (V1 + V2)                                        # Eq. 20
+    β   = V1 / V2
+    T12 = 4 * sqrt(β) / (1 + β)^2 * sqrt(g1.Tcr * g2.Tcr)        # Eq. 21
+    VT  = x1^2 * V1 * g1.Tcr + 2 * x1 * x2 * V12 * T12 + x2^2 * V2 * g2.Tcr
+    ρr  = 0.291 * V * _rhom(fp, T, P)
+    λ0 + (1 - 1 / 2.94) * _lamstar(fp.M, VT / V, V) * _Ψλ(ρr)    # Eq. 33
+end
+
+prandtl(fp::NobleGasMixture, T, P) =
+    cp(fp, T, P) * viscosity(fp, T, P) / conductivity(fp, T, P)

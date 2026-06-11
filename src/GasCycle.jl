@@ -52,6 +52,7 @@ export HELIUM, NEON, ARGON, KRYPTON, XENON
 # Note: `cp` is not exported to avoid conflict with Base.Filesystem.cp in Julia ≥ 1.12.
 # Use GasCycle.cp(...) or `import GasCycle: cp` to access it.
 export enthalpy, entropy, density, gamma, T_from_h, T_from_s, h_from_s
+export viscosity, conductivity, prandtl
 
 export FluidState, Port, AbstractElement
 export update

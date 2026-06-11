@@ -14,10 +14,10 @@ Review date: 2026-06-10
 
 ## Main reminders
 
-- Fix `HeXe(M_molar)` for AD. The helper rounds `M_molar` while building the display name, which fails when `M_molar` is a `ForwardDiff.Dual`.
+- ~~Fix `HeXe(M_molar)` for AD.~~ DONE 2026-06-10 (name built from `ForwardDiff.value`).
 - Add shared helpers for inverse solves, such as `_h_cp(fp,T,P)` and `_s_cp(fp,T,P)`, so each Newton step computes virial coefficients and density once.
 - Consider a bundled state API, such as `thermo_state(fp,T,P)`, returning `rho`, `h`, `s`, `cp`, and `gamma` together. Element code often asks for multiple properties at the same state.
-- Precompute mixture constants in the `NobleGasMixture` constructor before adding transport: `x2`, composition weights, pair constants, and transport pair coefficients.
+- Precompute mixture constants in the `NobleGasMixture` constructor: `x2` and composition weights (transport pair constants are now resolved in the constructor, 2026-06-10).
 - Keep the full 18-term LJ virial series for broad validity unless profiling shows `_B12_2` dominates. For ordinary He-Xe operating temperatures, fewer terms would likely be enough.
 
 ## Why inversion is the awkward part
@@ -38,4 +38,4 @@ This cost is multiplied in cycle solves because compressor/turbine outlet calcul
 
 ## Transport reminder
 
-`FluidProperties.jl` still has no `viscosity`, `conductivity`, or `prandtl` interface methods. When transport is added, avoid per-call pair-coefficient lookup. Resolve pair constants in the mixture constructor and share density/virial work between `mu`, `k`, and `Pr`.
+DONE 2026-06-10: `viscosity`, `conductivity`, `prandtl` added to the interface and implemented for `NobleGasMixture` (pair constants resolved in the constructor; 0 allocations; μ 458 ns / k 495 ns / Pr 1.3 μs at He-Xe 900 K). Remaining micro-opportunity: `prandtl` evaluates the density root three times (once each in `cp`, `μ`, `k`); a bundled state API would share it.

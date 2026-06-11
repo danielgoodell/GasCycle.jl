@@ -139,3 +139,84 @@ end
     @test P_virial ≈ P_ideal rtol = 0.01
     @test P_virial != P_ideal   # real-gas terms are present, just small
 end
+
+@testset "NobleGasMixture — transport: pure-gas limits" begin
+    # Eq. 7 makes Pr = cp·μ/λ = 2/3 exactly for a pure dilute monatomic gas
+    for g in (HELIUM, NEON, ARGON, KRYPTON, XENON)
+        @test prandtl(NobleGasFluid(g), 400.0, 1e4) ≈ 2 / 3 atol = 1e-3
+    end
+    # dilute viscosities vs handbook values
+    @test viscosity(NobleGasFluid(HELIUM), 300.0, 1e4) ≈ 19.9e-6 rtol = 0.02
+    @test viscosity(NobleGasFluid(XENON), 300.0, 1e4) ≈ 23.2e-6 rtol = 0.02
+
+    # Eq. 23b/33b reproduce the Table 1 critical-point transport column:
+    # μ* vs μcr = Δμcr/(1−1/2.3), λ* vs λcr·(1 + printed λ*cr deviation)
+    Vst(g) = 8.31441 * g.Tcr / g.Pcr
+    @test GasCycle._mustar(XENON.M, XENON.Tcr, Vst(XENON)) ≈ 52.25e-6 rtol = 0.015
+    for (g, dev) in ((HELIUM, 0.065), (NEON, 0.0047), (ARGON, -0.0050),
+                     (KRYPTON, 0.0099), (XENON, -0.0028))
+        @test GasCycle._lamstar(g.M, g.Tcr, Vst(g)) ≈ g.λcr * (1 + dev) rtol = 1e-3
+    end
+
+    # El-Genk §V pressure effects at 300 K / 2 MPa (vs the dilute limit)
+    xe = NobleGasFluid(XENON)
+    @test viscosity(xe, 300.0, 2e6) / viscosity(xe, 300.0, 1e3) - 1 ≈ 0.043 atol = 0.005
+    @test conductivity(xe, 300.0, 2e6) / conductivity(xe, 300.0, 1e3) - 1 ≈ 0.123 atol = 0.02
+    m40 = HeXe(40.0)
+    @test viscosity(m40, 300.0, 2e6) / viscosity(m40, 300.0, 1e3) - 1 ≈ 0.005 atol = 0.002
+    @test conductivity(m40, 300.0, 2e6) / conductivity(m40, 300.0, 1e3) - 1 ≈ 0.008 atol = 0.002
+
+    # composition endpoints collapse to the pure-gas path
+    for (T, P) in ((400.0, 2e6),)
+        @test viscosity(NobleGasMixture(HELIUM, XENON, 1.0), T, P) ==
+              viscosity(NobleGasFluid(HELIUM), T, P)
+        @test conductivity(NobleGasMixture(HELIUM, XENON, 0.0), T, P) ==
+              conductivity(NobleGasFluid(XENON), T, P)
+    end
+end
+
+@testset "NobleGasMixture — transport vs Johnson NASA/CR-2006-214394" begin
+    # He-Xe oracles: Johnson Tables 4-6 (Hirschfelder LJ theory; μ first
+    # order, k third order) and Table 7 (Taylor 1988 experiment).  El-Genk's
+    # data-fitted correlations sit systematically above LJ theory with a
+    # T-growing offset (μ to +5%, k to +9% at 1200 K) that CANCELS in Pr —
+    # our Pr matches Taylor's measurements to ≤1.1% at all four molecular
+    # weights, where Johnson's own method is high by 2.3-4.7%.
+    P = 0.1e6   # dilute-limit comparison pressure
+    johnson = (  # (M kg/kmol, T K, μ×10⁶ Pa·s, k(3rd order) W/m·K)
+        (20.183, 400.0, 31.6340, 0.124434),
+        (20.183, 800.0, 50.7860, 0.195756),
+        (20.183, 1200.0, 66.4595, 0.254660),
+        (39.94, 400.0, 33.1088, 0.080589),
+        (39.94, 800.0, 54.5763, 0.127540),
+        (39.94, 1200.0, 71.9178, 0.166432),
+        (83.8, 400.0, 31.8624, 0.032369),
+        (83.8, 800.0, 54.3585, 0.052095),
+        (83.8, 1200.0, 72.2199, 0.068370),
+    )
+    for (M, T, μ_o, k_o) in johnson
+        f = HeXe(M)
+        @test viscosity(f, T, P) ≈ μ_o * 1e-6 rtol = 0.05
+        @test conductivity(f, T, P) ≈ k_o rtol = 0.09
+    end
+    # Taylor 1988 experimental Prandtl numbers (Johnson Table 7)
+    for (M, T, Pr_o) in ((14.5, 972.0, 0.301), (28.3, 982.0, 0.231),
+                         (40.0, 941.0, 0.214), (83.8, 962.0, 0.251))
+        @test prandtl(HeXe(M), T, P) ≈ Pr_o rtol = 0.015
+    end
+end
+
+@testset "NobleGasMixture — transport AD" begin
+    hexe = HeXe(83.8)
+    T, P = 800.0, 1.5e6
+    # T- and P-derivatives propagate and match central differences
+    for f in (viscosity, conductivity, prandtl)
+        dT = ForwardDiff.derivative(t -> f(hexe, t, P), T)
+        @test dT ≈ (f(hexe, T + 0.5, P) - f(hexe, T - 0.5, P)) rtol = 1e-4
+        dP = ForwardDiff.derivative(p -> f(hexe, T, p), P)
+        @test dP ≈ (f(hexe, T, P + 500.0) - f(hexe, T, P - 500.0)) / 1e3 rtol = 1e-4
+    end
+    # derivative through the mixture ratio (Dual-valued x1 via HeXe(M))
+    dμdM = ForwardDiff.derivative(m -> viscosity(HeXe(m), T, P), 83.8)
+    @test dμdM ≈ (viscosity(HeXe(83.9), T, P) - viscosity(HeXe(83.7), T, P)) / 0.2 rtol = 1e-4
+end

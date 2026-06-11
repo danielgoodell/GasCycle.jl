@@ -216,6 +216,14 @@ function build_suite!()
     SUITE["fpt"]["sensitivity"]["forwarddiff-gradient"] =
         @benchmarkable ForwardDiff.gradient(x -> fpt_cycle_power(x, $fpt), $x0_fpt)
 
+    hexe = HeXe(83.8)
+    SUITE["noblegas"]["transport"]["viscosity"] =
+        @benchmarkable viscosity($hexe, $T_fpt, $P_fpt)
+    SUITE["noblegas"]["transport"]["conductivity"] =
+        @benchmarkable conductivity($hexe, $T_fpt, $P_fpt)
+    SUITE["noblegas"]["transport"]["prandtl"] =
+        @benchmarkable prandtl($hexe, $T_fpt, $P_fpt)
+
     SUITE
 end
 

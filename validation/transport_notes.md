@@ -1,5 +1,10 @@
 # Transport implementation notes (roadmap item 4, second half)
 
+> **STATUS: IMPLEMENTED 2026-06-10** in `src/thermo/NobleGasMixture.jl`
+> (tests in `test/test_noblegas.jl`, benchmarks in `benchmarks/`).
+> Findings recorded at the bottom; the Eq 33b "units unresolved" warning
+> below turned out to be a calculation error — see resolution.
+
 Extracted 2026-06-10 from El-Genk AIAA 2006-4154 (implementation source)
 and Johnson NASA/CR-2006-214394 (validation oracle). The thermo half is
 done and committed (`src/thermo/NobleGasMixture.jl`, 6a13300). This file
@@ -109,4 +114,29 @@ f₁₂:
    the gate is loose: < 5 μs is fine).
 5. Transport for other backends: optional (FPT tables lack μ/k; H2O/Oil
    function files return NaN/constants — leave unimplemented).
-"""
+
+## Implementation findings (2026-06-10)
+
+- **Eq 33b RESOLVED**: the printed formula is correct in pure SI
+  (M kg/mol, V* m³/mol, output W/m·K).  Fitting the prefactor against the
+  Table 1 λcr column with its printed λ*cr deviations gives 3.040e−5 for
+  all five gases to 5 significant figures — exactly the paper's 0.304e−4.
+  The earlier "units unresolved" note was an arithmetic slip.
+- Equations verified verbatim against the PDF during implementation
+  (Eqs 23-28: dense μ + He special case; 29-32: Wassiljewa dilute μ;
+  33-36: dense + first-order Hirschfelder dilute λ).  The Eq 34
+  determinant form and Eq 35 sign convention as recorded above are right.
+- **Johnson comparison**: systematic, T-growing offset above LJ theory
+  (μ −0.7% → +4.7%, k(3rd) +2.2% → +8.5% over 400→1200 K, coherent across
+  all three mixture weights).  This is method disagreement — El-Genk is a
+  data fit (claims ±4% μ for He binaries to 1533 K, ±5% λ° for 87% of
+  data) — and it cancels in Pr.
+- **Pr vs Taylor 1988 experiment** (Johnson Table 7): ours matches to
+  ≤1.1% at all four molecular weights (e.g. M=83.8 @ 962 K: 0.2537 vs
+  0.251 measured), where Johnson's Hirschfelder values are +2.3 to +4.7%
+  high.  Strongest available endorsement of the El-Genk correlations.
+- El-Genk §V pressure-effect spot values reproduced (Xe 300 K/2 MPa:
+  μ +4.5% vs paper's +4.3%, λ +13.8% vs +12.3%; M=40 both < 1%).
+- Perf: 0 allocations; μ 458 ns, k 495 ns, Pr 1.3 μs (gate was 5 μs).
+- `HeXe(M_molar)` Dual-input name bug (perf-notes reminder) fixed in
+  passing; AD through x₁ now tested for transport too.
