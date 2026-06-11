@@ -72,6 +72,13 @@ end
     @test T_from_h(hexe, enthalpy(hexe, 700.0, P), P) ≈ 700.0 atol = 1e-8
     @test T_from_s(hexe, entropy(hexe, 700.0, P), P) ≈ 700.0 atol = 1e-6
     @test T_from_h(hexe, enthalpy(hexe, 700.0, P), P; T_guess = 400.0) ≈ 700.0 atol = 1e-8
+    # T_from_s honors the caller's guess: same root from a near-exact guess,
+    # a far-off guess (isentropic full-PR call pattern), and one bad enough
+    # to trip the half-T step cap
+    s700 = entropy(hexe, 700.0, P)
+    @test T_from_s(hexe, s700, P; T_guess = 701.0) ≈ 700.0 atol = 1e-6
+    @test T_from_s(hexe, s700, P; T_guess = 400.0) ≈ 700.0 atol = 1e-6
+    @test T_from_s(hexe, s700, P; T_guess = 4000.0) ≈ 700.0 atol = 1e-6
 end
 
 @testset "NobleGasMixture — composition and AD through x₁" begin

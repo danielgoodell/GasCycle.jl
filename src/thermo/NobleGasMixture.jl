@@ -322,69 +322,97 @@ function _rhom(fp::NobleGasMixture, T, P)
 end
 
 # ── FluidProperties interface (all analytic, Eqs. 12-15) ─────────────────────
-density(fp::NobleGasMixture, T, P) = _rhom(fp, T, P) * fp.M
+# Molar kernels over a shared (virial pass, density root) evaluation, so the
+# fused Newton helpers below pay for one pass per iteration instead of two.
 
-function enthalpy(fp::NobleGasMixture, T, P)
-    B, B′, _, C, C′, _ = _virial(fp, T)
-    ρ̂ = _rhom_BC(B, C, T, P)
-    (2.5 * _Rg * T +
-     ρ̂ * _Rg * T * ((B - T * B′) + ρ̂ * (C - T * C′ / 2))) / fp.M  # Eq. 12
+_h_molar(B, B′, C, C′, ρ̂, T) =                                   # Eq. 12
+    2.5 * _Rg * T + ρ̂ * _Rg * T * ((B - T * B′) + ρ̂ * (C - T * C′ / 2))
+
+function _s_molar(B, B′, C, C′, ρ̂, T, P)
+    Z = P / (ρ̂ * _Rg * T)
+    2.5 * _Rg * log(T / 298.15) - _Rg * log(P / 101325.0) + _Rg * log(Z) -
+        _Rg * ((B + T * B′) * ρ̂ + (C + T * C′) * ρ̂^2 / 2)
 end
 
-function cp(fp::NobleGasMixture, T, P)
-    B, B′, B″, C, C′, C″ = _virial(fp, T)
-    ρ̂ = _rhom_BC(B, C, T, P)
+function _cp_molar(B, B′, B″, C, C′, C″, ρ̂, T)
     # Eq. 14: density change along the isobar
     dρ̂dT = -((ρ̂ + B * ρ̂^2 + C * ρ̂^3) / T + B′ * ρ̂^2 + C′ * ρ̂^3) /
             (1 + 2B * ρ̂ + 3C * ρ̂^2)
     # Eq. 13
-    ĉp = 2.5 * _Rg +
-         ρ̂ * _Rg * ((B - T * B′ - T^2 * B″) + ρ̂ * (C - T^2 * C″ / 2)) +
-         _Rg * T * ((B - T * B′) + ρ̂ * (2C - T * C′)) * dρ̂dT
-    ĉp / fp.M
+    2.5 * _Rg +
+        ρ̂ * _Rg * ((B - T * B′ - T^2 * B″) + ρ̂ * (C - T^2 * C″ / 2)) +
+        _Rg * T * ((B - T * B′) + ρ̂ * (2C - T * C′)) * dρ̂dT
+end
+
+_cv_molar(B′, B″, C′, C″, ρ̂, T) =                                # Eq. 15
+    1.5 * _Rg - ρ̂ * _Rg * T * ((2 * B′ + T * B″) + ρ̂ * (C′ + T * C″ / 2))
+
+density(fp::NobleGasMixture, T, P) = _rhom(fp, T, P) * fp.M
+
+function enthalpy(fp::NobleGasMixture, T, P)
+    B, B′, _, C, C′, _ = _virial(fp, T)
+    _h_molar(B, B′, C, C′, _rhom_BC(B, C, T, P), T) / fp.M
+end
+
+function cp(fp::NobleGasMixture, T, P)
+    B, B′, B″, C, C′, C″ = _virial(fp, T)
+    _cp_molar(B, B′, B″, C, C′, C″, _rhom_BC(B, C, T, P), T) / fp.M
 end
 
 function entropy(fp::NobleGasMixture, T, P)
     B, B′, _, C, C′, _ = _virial(fp, T)
-    ρ̂ = _rhom_BC(B, C, T, P)
-    Z = P / (ρ̂ * _Rg * T)
-    (2.5 * _Rg * log(T / 298.15) - _Rg * log(P / 101325.0) + _Rg * log(Z) -
-     _Rg * ((B + T * B′) * ρ̂ + (C + T * C′) * ρ̂^2 / 2)) / fp.M
+    _s_molar(B, B′, C, C′, _rhom_BC(B, C, T, P), T, P) / fp.M
 end
 
 function gamma(fp::NobleGasMixture, T, P)
     B, B′, B″, C, C′, C″ = _virial(fp, T)
     ρ̂ = _rhom_BC(B, C, T, P)
-    dρ̂dT = -((ρ̂ + B * ρ̂^2 + C * ρ̂^3) / T + B′ * ρ̂^2 + C′ * ρ̂^3) /
-            (1 + 2B * ρ̂ + 3C * ρ̂^2)
-    ĉp = 2.5 * _Rg +
-         ρ̂ * _Rg * ((B - T * B′ - T^2 * B″) + ρ̂ * (C - T^2 * C″ / 2)) +
-         _Rg * T * ((B - T * B′) + ρ̂ * (2C - T * C′)) * dρ̂dT
-    # Eq. 15
-    ĉv = 1.5 * _Rg -
-         ρ̂ * _Rg * T * ((2 * B′ + T * B″) + ρ̂ * (C′ + T * C″ / 2))
-    ĉp / ĉv
+    _cp_molar(B, B′, B″, C, C′, C″, ρ̂, T) / _cv_molar(B′, B″, C′, C″, ρ̂, T)
 end
 
-# Newton inversions with exact derivatives (2-4 iterations; h is nearly
-# linear in T for monatomic gases)
+"""h and cp from a single virial pass and density root (Newton helper)."""
+function _h_cp(fp::NobleGasMixture, T, P)
+    B, B′, B″, C, C′, C″ = _virial(fp, T)
+    ρ̂ = _rhom_BC(B, C, T, P)
+    (_h_molar(B, B′, C, C′, ρ̂, T) / fp.M,
+     _cp_molar(B, B′, B″, C, C′, C″, ρ̂, T) / fp.M)
+end
+
+"""s and cp from a single virial pass and density root (Newton helper)."""
+function _s_cp(fp::NobleGasMixture, T, P)
+    B, B′, B″, C, C′, C″ = _virial(fp, T)
+    ρ̂ = _rhom_BC(B, C, T, P)
+    (_s_molar(B, B′, C, C′, ρ̂, T, P) / fp.M,
+     _cp_molar(B, B′, B″, C, C′, C″, ρ̂, T) / fp.M)
+end
+
+# Newton inversions with exact derivatives.  h is nearly linear and s nearly
+# logarithmic in T for monatomic gases, so a good caller guess (the elements
+# all pass one) converges in 1-2 iterations; the ideal-gas closed-form start
+# needs 2-3.  Breaking on the pre-update residual applies the final dual
+# correction first, so ForwardDiff derivatives are exact at convergence.
 function T_from_h(fp::NobleGasMixture, h_target, P; T_guess = nothing)
     T = isnothing(T_guess) ? h_target * fp.M / (2.5 * _Rg) : float(T_guess)
-    for _ in 1:6
-        r = enthalpy(fp, T, P) - h_target
-        T -= r / cp(fp, T, P)
+    for _ in 1:8
+        h, c = _h_cp(fp, T, P)
+        r = h - h_target
+        T -= r / c
         abs(r) < 1e-9 * abs(h_target) + 1e-12 && break
     end
     T
 end
 
-function T_from_s(fp::NobleGasMixture, s_target, P; T_guess = 500.0)
+function T_from_s(fp::NobleGasMixture, s_target, P; T_guess = nothing)
     cp0 = 2.5 * _Rg / fp.M
-    # ideal-gas closed-form start, then Newton with ds/dT = cp/T
-    T = 298.15 * exp((s_target + (_Rg / fp.M) * log(P / 101325.0)) / cp0)
-    for _ in 1:6
-        r = entropy(fp, T, P) - s_target
-        T -= r * T / cp(fp, T, P)
+    T = isnothing(T_guess) ?
+        298.15 * exp((s_target + (_Rg / fp.M) * log(P / 101325.0)) / cp0) :
+        float(T_guess)
+    for _ in 1:8
+        s, c = _s_cp(fp, T, P)
+        r = s - s_target
+        # ds/dT = cp/T; cap the step at half of T so a poor caller guess
+        # cannot drive T nonpositive (log domain)
+        T = max(T - r * T / c, 0.5 * T)
         abs(r) < 1e-11 * cp0 && break
     end
     T
