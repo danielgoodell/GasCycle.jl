@@ -33,12 +33,13 @@ All values are converted to SI on load.
   Cp   → cp(Pt, Tt)
   gam  → gamma(Pt, Tt)
   rho  → density(Pt, Tt)
-  T_h  → T_from_h(Pt, ht)        (pre-computed inverse, uniform ht assumed)
-  T_s  → T_from_s(Pt, s)         (pre-computed inverse)
+  T_h  → T_from_h(Pt, ht)        (pre-computed ragged inverse)
+  T_s  → T_from_s(Pt, s)         (pre-computed ragged inverse)
   h_s  → h_from_s(Pt, s)         (isentropic: h at same entropy, different P)
 """
 
 using Interpolations
+using ForwardDiff: ForwardDiff
 
 # ── Unit conversion factors (ENGLISH → SI) ───────────────────────────────────
 const _PSIA_TO_PA  = 6894.757
@@ -48,24 +49,33 @@ const _BTU_LBM_R_TO_SI   = 4186.8            # BTU/(lbm·R) → J/(kg·K)
 const _LBM_FT3_TO_KG_M3  = 16.01846          # lbm/ft³ → kg/m³
 
 # ── Main struct ───────────────────────────────────────────────────────────────
-struct FPTFluid <: FluidProperties
+struct FPTFluid{H,S,CP,GAM,RHO,TH,TS,HS} <: FluidProperties
     name::String
     bounds::Symbol  # :error, :warn, or :clamp for out-of-table T/P lookups
     s_interp::Symbol  # :log_pressure (detrended, default) or :linear (legacy/NPSS-compat)
     R_s::Float64      # gas constant fitted from the s table [J/(kg·K)] (:log_pressure)
     P_ref::Float64    # detrending reference pressure [Pa]
-    itp_h::Any      # h(Pt, Tt)  [J/kg]
-    itp_s::Any      # s(Pt, Tt) [J/(kg·K)], or detrended σ = s + R_s·ln(Pt/P_ref)
-    itp_cp::Any     # cp(Pt, Tt) [J/(kg·K)]
-    itp_gam::Any    # γ(Pt, Tt)  [-]
-    itp_rho::Any    # ρ(Pt, Tt)  [kg/m³]
+    itp_h::H        # h(Pt, Tt)  [J/kg]
+    itp_s::S        # s(Pt, Tt) [J/(kg·K)], or detrended σ = s + R_s·ln(Pt/P_ref)
+    itp_cp::CP      # cp(Pt, Tt) [J/(kg·K)]
+    itp_gam::GAM    # γ(Pt, Tt)  [-]
+    itp_rho::RHO    # ρ(Pt, Tt)  [kg/m³]
     # Inverse / isentropic tables (optional; may be nothing)
-    itp_Th::Any     # Tt(Pt, ht) [K] from pre-computed T_h table
-    itp_Ts::Any     # Tt(Pt, s)  [K] from pre-computed T_s table
-    itp_hs::Any     # ht(Pt, s)  [J/kg] from h_s table
+    itp_Th::TH      # Tt(Pt, ht) [K] from pre-computed T_h table
+    itp_Ts::TS      # Tt(Pt, s)  [K] from pre-computed T_s table
+    itp_hs::HS      # ht(Pt, s)  [J/kg] from h_s table
     Pt_min::Float64; Pt_max::Float64
     Tt_min::Float64; Tt_max::Float64
 end
+
+struct _RaggedFPTTable
+    Pt_axis::Vector{Float64}
+    x_rows::Vector{Vector{Float64}}
+    y_rows::Vector{Vector{Float64}}
+end
+
+_fpt_value(x) = x
+_fpt_value(x::ForwardDiff.Dual) = _fpt_value(ForwardDiff.value(x))
 
 # ── Fast line-by-line FPT parser ─────────────────────────────────────────────
 
@@ -213,6 +223,58 @@ function _build_itp(Pt_vals, inner_arr, out_arr,
     interpolate((Pt_axis, in_axis), data, Gridded(Linear()))
 end
 
+function _build_ragged_itp(Pt_vals, inner_arr, out_arr,
+                           Pt_fac::Float64, in_fac::Float64, out_fac::Float64;
+                           in_shift = nothing)
+    nPt = length(Pt_vals)
+    Pt_axis = Pt_vals .* Pt_fac
+    x_rows = Vector{Vector{Float64}}(undef, nPt)
+    y_rows = Vector{Vector{Float64}}(undef, nPt)
+    for i in 1:nPt
+        length(inner_arr[i]) == length(out_arr[i]) ||
+            error("FPTFluid: inconsistent row length at Pt index $i")
+        x = inner_arr[i] .* in_fac
+        if !isnothing(in_shift)
+            @. x += in_shift(Pt_axis[i])
+        end
+        y = out_arr[i] .* out_fac
+        if length(x) < 2
+            error("FPTFluid: ragged inverse table needs at least two points per row")
+        elseif x[1] > x[end]
+            reverse!(x)
+            reverse!(y)
+        end
+        issorted(x) || error("FPTFluid: ragged inverse table row $i is not monotone")
+        x_rows[i] = x
+        y_rows[i] = y
+    end
+    _RaggedFPTTable(Pt_axis, x_rows, y_rows)
+end
+
+function _bracket_index(axis::Vector{Float64}, x)
+    xv = _fpt_value(x)
+    xv <= axis[1] && return 1
+    xv >= axis[end] && return length(axis) - 1
+    clamp(searchsortedlast(axis, xv), 1, length(axis) - 1)
+end
+
+function _interp_row(x::Vector{Float64}, y::Vector{Float64}, target)
+    tv = _fpt_value(target)
+    tv <= x[1]   && return y[1]   + zero(target)
+    tv >= x[end] && return y[end] + zero(target)
+    j = clamp(searchsortedlast(x, tv), 1, length(x) - 1)
+    w = (target - x[j]) / (x[j+1] - x[j])
+    y[j] + w * (y[j+1] - y[j])
+end
+
+function _ragged_lookup(tbl::_RaggedFPTTable, P, x)
+    i = _bracket_index(tbl.Pt_axis, P)
+    y1 = _interp_row(tbl.x_rows[i],   tbl.y_rows[i],   x)
+    y2 = _interp_row(tbl.x_rows[i+1], tbl.y_rows[i+1], x)
+    wP = (P - tbl.Pt_axis[i]) / (tbl.Pt_axis[i+1] - tbl.Pt_axis[i])
+    y1 + wP * (y2 - y1)
+end
+
 """
     _fit_R_from_s(Pt_axis, s_data) -> R [J/(kg·K)]
 
@@ -270,6 +332,14 @@ function FPTFluid(path::String; bounds::Symbol = :error,
         _build_itp(Pt_vals, inner_arr, out_arr, Pt_fac, in_fac, out_fac)
     end
 
+    function get_ragged_itp(tname, Pt_fac, in_fac, out_fac; in_shift = nothing)
+        haskey(tables, tname) || return nothing
+        Pt_vals, inner_arr, out_arr = tables[tname]
+        isempty(Pt_vals) && return nothing
+        _build_ragged_itp(Pt_vals, inner_arr, out_arr, Pt_fac, in_fac, out_fac;
+                          in_shift = in_shift)
+    end
+
     itp_h   = get_itp("h_T", _PSIA_TO_PA, _R_TO_K, _BTU_LBM_TO_J_KG)
     itp_cp  = get_itp("Cp",  _PSIA_TO_PA, _R_TO_K, _BTU_LBM_R_TO_SI)
     itp_gam = get_itp("gam", _PSIA_TO_PA, _R_TO_K, 1.0)
@@ -304,12 +374,15 @@ function FPTFluid(path::String; bounds::Symbol = :error,
     isnothing(itp_s)  && error("FPTFluid: required table 's_T' not found in $path")
     isnothing(itp_cp) && error("FPTFluid: table 'Cp' not found in $path")
 
-    # The inverse tables (T_h, T_s, h_s) have non-uniform inner grids
-    # (h and s vary with Pt due to real-gas effects) so they can't be
-    # represented as regular 2D grids.  Fall back to bisection.
-    itp_Th = nothing
-    itp_Ts = nothing
-    itp_hs = nothing
+    # Inverse tables are ragged: h/s nodes vary with pressure.  Use row-wise
+    # interpolation in the inner coordinate, then interpolate the two row
+    # results in pressure.
+    s_shift = s_interp == :log_pressure ? P -> R_s * log(P / P_ref) : nothing
+    itp_Th = get_ragged_itp("T_h", _PSIA_TO_PA, _BTU_LBM_TO_J_KG, _R_TO_K)
+    itp_Ts = get_ragged_itp("T_s", _PSIA_TO_PA, _BTU_LBM_R_TO_SI, _R_TO_K;
+                            in_shift = s_shift)
+    itp_hs = get_ragged_itp("h_s", _PSIA_TO_PA, _BTU_LBM_R_TO_SI, _BTU_LBM_TO_J_KG;
+                            in_shift = s_shift)
 
     Pt_vals_SI = tables["h_T"][1] .* _PSIA_TO_PA
     Tt_vals_SI = tables["h_T"][2][1] .* _R_TO_K
@@ -330,9 +403,17 @@ function _bounds_message(fp::FPTFluid, prop::Symbol, T, P)
     "Use FPTFluid(path; bounds=:warn) or bounds=:clamp to allow clamped lookup."
 end
 
+function _bounds_message_P(fp::FPTFluid, prop::Symbol, P)
+    "FPTFluid $(fp.name): $(prop) requested outside table pressure bounds. " *
+    "Requested: P=$(P) Pa. Valid: P=$(fp.Pt_min)..$(fp.Pt_max) Pa. " *
+    "Use FPTFluid(path; bounds=:warn) or bounds=:clamp to allow clamped lookup."
+end
+
 function _clamp_PT(fp::FPTFluid, T, P, prop::Symbol)
-    out = (P < fp.Pt_min || P > fp.Pt_max ||
-           T < fp.Tt_min || T > fp.Tt_max)
+    Pv = _fpt_value(P)
+    Tv = _fpt_value(T)
+    out = (Pv < fp.Pt_min || Pv > fp.Pt_max ||
+           Tv < fp.Tt_min || Tv > fp.Tt_max)
     if out
         msg = _bounds_message(fp, prop, T, P)
         fp.bounds == :error && throw(DomainError((T=T, P=P), msg))
@@ -340,6 +421,17 @@ function _clamp_PT(fp::FPTFluid, T, P, prop::Symbol)
     end
     (clamp(P, fp.Pt_min, fp.Pt_max),
      clamp(T, fp.Tt_min, fp.Tt_max))
+end
+
+function _clamp_P(fp::FPTFluid, P, prop::Symbol)
+    Pv = _fpt_value(P)
+    out = Pv < fp.Pt_min || Pv > fp.Pt_max
+    if out
+        msg = _bounds_message_P(fp, prop, P)
+        fp.bounds == :error && throw(DomainError(P, msg))
+        fp.bounds == :warn && @warn msg
+    end
+    clamp(P, fp.Pt_min, fp.Pt_max)
 end
 
 function cp(fp::FPTFluid, T, P)
@@ -373,10 +465,8 @@ end
 
 function T_from_h(fp::FPTFluid, h_target, P; T_guess=500.0)
     if !isnothing(fp.itp_Th)
-        Pc, _ = _clamp_PT(fp, T_guess, P, :T_from_h)
-        h_min = enthalpy(fp, fp.Tt_min, Pc)
-        h_max = enthalpy(fp, fp.Tt_max, Pc)
-        return fp.itp_Th(Pc, clamp(h_target, h_min, h_max))
+        Pc = _clamp_P(fp, P, :T_from_h)
+        return _ragged_lookup(fp.itp_Th, Pc, h_target)
     end
     # bisection fallback (returns primal; does not propagate AD derivatives)
     T_lo, T_hi = fp.Tt_min, fp.Tt_max
@@ -390,10 +480,10 @@ end
 
 function T_from_s(fp::FPTFluid, s_target, P; T_guess=500.0)
     if !isnothing(fp.itp_Ts)
-        Pc, _ = _clamp_PT(fp, T_guess, P, :T_from_s)
-        s_min = entropy(fp, fp.Tt_min, Pc)
-        s_max = entropy(fp, fp.Tt_max, Pc)
-        return fp.itp_Ts(Pc, clamp(s_target, s_min, s_max))
+        Pc = _clamp_P(fp, P, :T_from_s)
+        s_lookup = fp.s_interp == :log_pressure ?
+                   s_target + fp.R_s * log(Pc / fp.P_ref) : s_target
+        return _ragged_lookup(fp.itp_Ts, Pc, s_lookup)
     end
     # bisection fallback (returns primal; does not propagate AD derivatives)
     T_lo, T_hi = fp.Tt_min, fp.Tt_max
@@ -412,10 +502,10 @@ Enthalpy at pressure Pt_out for an isentropic process from entropy s.
 """
 function h_from_s(fp::FPTFluid, s, P)
     if !isnothing(fp.itp_hs)
-        Pc, _ = _clamp_PT(fp, 0.5 * (fp.Tt_min + fp.Tt_max), P, :h_from_s)
-        s_min = entropy(fp, fp.Tt_min, Pc)
-        s_max = entropy(fp, fp.Tt_max, Pc)
-        return fp.itp_hs(Pc, clamp(s, s_min, s_max))
+        Pc = _clamp_P(fp, P, :h_from_s)
+        s_lookup = fp.s_interp == :log_pressure ?
+                   s + fp.R_s * log(Pc / fp.P_ref) : s
+        return _ragged_lookup(fp.itp_hs, Pc, s_lookup)
     end
     T_exit = T_from_s(fp, s, P)
     enthalpy(fp, T_exit, P)
