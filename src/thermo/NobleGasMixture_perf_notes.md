@@ -1,16 +1,30 @@
 # NobleGasMixture Performance Notes
 
-Review date: 2026-06-10
+Review date: 2026-06-10 (baseline re-measured 2026-06-11)
 
-## Current baseline
+## Current baseline (2026-06-11, `SUITE["backends"]` in benchmarks/)
 
-- `NobleGasMixture.jl` thermodynamic scalar calls are type-stable and allocation-free.
-- He-Xe direct scalar thermodynamic calls are roughly `330 ns/property`; FPT table lookups are roughly `167 ns/property`, but allocate per lookup.
-- Direct inverse calls are faster than current FPT fallback inversions in isolation:
-  - `T_from_h`: about `1.8 us`
-  - `T_from_s`: about `2.3 us`
-  - FPT fallback inversions were about `4.3 us` and `5.5 us`
-- A BRU-shaped primal `one_pass!` was faster with NobleGas than FPT, but the design-solver ForwardDiff back-edge Jacobian was slower with NobleGas.
+Identical recuperated-design model and gas (He-Xe M = 83.8) across the three
+backends.  NOTE: the FPT numbers improved an order of magnitude vs the
+2026-06-10 measurements (commit 35d1023 made inversions table-direct), so the
+old "direct inversions beat FPT" conclusion is obsolete — NobleGas is now the
+slow backend everywhere:
+
+| benchmark (min time)        | idealgas | fpt     | noblegas | vs fpt |
+|-----------------------------|----------|---------|----------|--------|
+| scalar forward5 (5 props)   | 25 ns    | 373 ns  | 1.67 μs  | 4.5×   |
+| T_from_h                    | 2.3 ns   | 74 ns   | 678 ns   | 9×     |
+| T_from_s                    | 24 ns    | 93 ns   | 2.27 μs  | 24×    |
+| h_from_s                    | 24 ns    | 97 ns   | 2.60 μs  | 27×    |
+| AD dT/dh                    | 2.6 ns   | 84 ns   | 666 ns   | 8×     |
+| AD dT/ds                    | 24 ns    | 96 ns   | 3.34 μs  | 35×    |
+| solve! recuperated-design   | 171 μs   | 290 μs  | 2.13 ms  | 7.3×   |
+| ForwardDiff cycle gradient  | 231 μs   | 386 μs  | 4.12 ms  | 10.7×  |
+
+All scalar paths remain allocation-free; the gap is pure recomputation —
+see "Why inversion is the awkward part" below.  The fix list in "Main
+reminders" (shared `_h_cp`/`_s_cp` Newton helpers, honor `T_guess` in
+`T_from_s`) directly targets the 24-35× rows.
 
 ## Main reminders
 

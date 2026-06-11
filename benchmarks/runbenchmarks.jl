@@ -10,18 +10,17 @@ using GasCycle
 
 const SUITE = BenchmarkGroup()
 
-function fpt_forward5(fluid, T, P)
-    GasCycle.cp(fluid, T, P),
-    enthalpy(fluid, T, P),
-    entropy(fluid, T, P),
-    density(fluid, T, P),
-    gamma(fluid, T, P)
-end
+backend_forward5(fluid, T, P) =
+    (GasCycle.cp(fluid, T, P),
+     enthalpy(fluid, T, P),
+     entropy(fluid, T, P),
+     density(fluid, T, P),
+     gamma(fluid, T, P))
 
-fpt_dTdh(fluid, h, P, T_guess) =
+backend_dTdh(fluid, h, P, T_guess) =
     ForwardDiff.derivative(hx -> T_from_h(fluid, hx, P; T_guess), h)
 
-fpt_dTds(fluid, s, P, T_guess) =
+backend_dTds(fluid, s, P, T_guess) =
     ForwardDiff.derivative(sx -> T_from_s(fluid, sx, P; T_guess), s)
 
 function simple_brayton_net()
@@ -62,7 +61,7 @@ function recuperated_design_net()
     net
 end
 
-function fpt_recuperated_design_net(fluid)
+function backend_recuperated_design_net(fluid)
     T_in, P_in, W_flow = 400.0, 500e3, 10.0
 
     comp = Compressor("Comp"; PR=2.5, η_poly=0.87)
@@ -163,7 +162,7 @@ function cycle_power(x::AbstractVector)
     net_power(sol)
 end
 
-function fpt_cycle_power(x::AbstractVector, fluid)
+function backend_cycle_power(x::AbstractVector, fluid)
     PR_comp, T_reactor_exit = x[1], x[2]
     T0, P0, W = 400.0, 500e3, 10.0
 
@@ -187,42 +186,53 @@ function build_suite!()
     recup = recuperated_design_net()
     offdesign = offdesign_map_net()
     x0 = [2.5, 0.90]
-    fpt = FPTFluid(joinpath(dirname(@__DIR__), "HeXe84.fpt"))
-    fpt_recup = fpt_recuperated_design_net(fpt)
-    T_fpt, P_fpt = 900.0, 2.0e5
-    h_fpt = enthalpy(fpt, T_fpt, P_fpt)
-    s_fpt = entropy(fpt, T_fpt, P_fpt)
-    x0_fpt = [2.5, 1100.0]
 
     SUITE["solve"]["simple-brayton"] = @benchmarkable solve!($simple)
     SUITE["solve"]["recuperated-design"] = @benchmarkable solve!($recup)
     SUITE["solve"]["offdesign-map"] = @benchmarkable solve!($offdesign)
     SUITE["sensitivity"]["forwarddiff-gradient"] =
         @benchmarkable ForwardDiff.gradient($cycle_power, $x0)
-    SUITE["fpt"]["scalar"]["forward5"] =
-        @benchmarkable fpt_forward5($fpt, $T_fpt, $P_fpt)
-    SUITE["fpt"]["scalar"]["T-from-h"] =
-        @benchmarkable T_from_h($fpt, $h_fpt, $P_fpt; T_guess=$T_fpt)
-    SUITE["fpt"]["scalar"]["T-from-s"] =
-        @benchmarkable T_from_s($fpt, $s_fpt, $P_fpt; T_guess=$T_fpt)
-    SUITE["fpt"]["scalar"]["h-from-s"] =
-        @benchmarkable h_from_s($fpt, $s_fpt, $P_fpt)
-    SUITE["fpt"]["scalar-ad"]["dTdh"] =
-        @benchmarkable fpt_dTdh($fpt, $h_fpt, $P_fpt, $T_fpt)
-    SUITE["fpt"]["scalar-ad"]["dTds"] =
-        @benchmarkable fpt_dTds($fpt, $s_fpt, $P_fpt, $T_fpt)
-    SUITE["fpt"]["solve"]["recuperated-design"] =
-        @benchmarkable solve!($fpt_recup)
-    SUITE["fpt"]["sensitivity"]["forwarddiff-gradient"] =
-        @benchmarkable ForwardDiff.gradient(x -> fpt_cycle_power(x, $fpt), $x0_fpt)
 
+    # ── Backend comparison: identical model and gas (He-Xe, M = 83.8) ──────
+    # through every property path the solver exercises.
+    T_b, P_b = 900.0, 2.0e5
+    x0_b = [2.5, 1100.0]
+    backends = (
+        "idealgas" => IdealGasFluid(M_molar=83.8),
+        "fpt"      => FPTFluid(joinpath(dirname(@__DIR__), "HeXe84.fpt")),
+        "noblegas" => HeXe(83.8),
+    )
+    for (key, fluid) in backends
+        h_b = enthalpy(fluid, T_b, P_b)
+        s_b = entropy(fluid, T_b, P_b)
+        net = backend_recuperated_design_net(fluid)
+        g = SUITE["backends"][key]
+        g["scalar"]["forward5"] =
+            @benchmarkable backend_forward5($fluid, $T_b, $P_b)
+        g["scalar"]["T-from-h"] =
+            @benchmarkable T_from_h($fluid, $h_b, $P_b; T_guess=$T_b)
+        g["scalar"]["T-from-s"] =
+            @benchmarkable T_from_s($fluid, $s_b, $P_b; T_guess=$T_b)
+        g["scalar"]["h-from-s"] =
+            @benchmarkable h_from_s($fluid, $s_b, $P_b)
+        g["scalar-ad"]["dTdh"] =
+            @benchmarkable backend_dTdh($fluid, $h_b, $P_b, $T_b)
+        g["scalar-ad"]["dTds"] =
+            @benchmarkable backend_dTds($fluid, $s_b, $P_b, $T_b)
+        g["solve"]["recuperated-design"] =
+            @benchmarkable solve!($net)
+        g["sensitivity"]["forwarddiff-gradient"] =
+            @benchmarkable ForwardDiff.gradient(x -> backend_cycle_power(x, $fluid), $x0_b)
+    end
+
+    # transport exists only on the direct backend (FPT tables lack μ/k)
     hexe = HeXe(83.8)
     SUITE["noblegas"]["transport"]["viscosity"] =
-        @benchmarkable viscosity($hexe, $T_fpt, $P_fpt)
+        @benchmarkable viscosity($hexe, $T_b, $P_b)
     SUITE["noblegas"]["transport"]["conductivity"] =
-        @benchmarkable conductivity($hexe, $T_fpt, $P_fpt)
+        @benchmarkable conductivity($hexe, $T_b, $P_b)
     SUITE["noblegas"]["transport"]["prandtl"] =
-        @benchmarkable prandtl($hexe, $T_fpt, $P_fpt)
+        @benchmarkable prandtl($hexe, $T_b, $P_b)
 
     SUITE
 end

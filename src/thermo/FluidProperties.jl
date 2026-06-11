@@ -52,6 +52,15 @@ function gamma(fp::FluidProperties, T, P)
 end
 
 """
+    h_from_s(fp, s, P) -> h [J/kg]
+
+Enthalpy at pressure P for an isentropic process arriving at entropy s.
+Default composes T_from_s and enthalpy; backends with direct inverse
+tables (FPTFluid) override.
+"""
+h_from_s(fp::FluidProperties, s, P) = enthalpy(fp, T_from_s(fp, s, P), P)
+
+"""
     viscosity(fp, T, P) -> dynamic viscosity μ [Pa·s]
 """
 function viscosity(fp::FluidProperties, T, P)

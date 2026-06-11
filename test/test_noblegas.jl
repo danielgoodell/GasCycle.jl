@@ -220,3 +220,10 @@ end
     dμdM = ForwardDiff.derivative(m -> viscosity(HeXe(m), T, P), 83.8)
     @test dμdM ≈ (viscosity(HeXe(83.9), T, P) - viscosity(HeXe(83.7), T, P)) / 0.2 rtol = 1e-4
 end
+
+@testset "NobleGasMixture — h_from_s interface fallback" begin
+    hexe = HeXe(83.8)
+    s = entropy(hexe, 900.0, 2.0e5)
+    h = h_from_s(hexe, s, 1.5e5)   # generic fallback: enthalpy ∘ T_from_s
+    @test entropy(hexe, T_from_h(hexe, h, 1.5e5), 1.5e5) ≈ s rtol = 1e-8
+end
