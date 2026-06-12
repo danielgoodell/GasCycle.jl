@@ -9,13 +9,24 @@ heat-rejection cooler).
   Q = ε * Q_max
   Q_max is computed from the limiting endpoint enthalpy change.
 
-Effectiveness comes from one of two modes:
+Effectiveness comes from one of three modes:
 
   :effectiveness — ε is a fixed parameter (default).
   :UA            — ε is computed each pass from the counter-flow ε-NTU
                    relation with NTU = UA / C_min, so effectiveness
                    responds to off-design flow and property changes.
                    Selected automatically when the `UA` keyword is given.
+  :scaled_UA     — like :UA, but UA itself responds to off-design flow:
+                   each stream's film conductance scales Colburn-style as
+                   (W/W_des)^UA_exp (default 0.8) and the two side
+                   resistances — assumed equal at design — recombine:
+
+                     UA = 2·UA_des / [(W_hot_des/W_hot)^n + (W_cold_des/W_cold)^n]
+
+                   Enter this mode by calling `size_UA!(hx)` after a
+                   converged design solve (inverts ε-NTU at the design
+                   state to find UA_des and records the design flows), or
+                   construct directly with `UA`, `W_hot_des`, `W_cold_des`.
 
 NPSS compatibility note:
   NPSS's HeatExchanger `effect` convention uses stream capacity rates:
@@ -35,12 +46,21 @@ Usage in FlowNetwork:
   hx = HeatExchanger("Recup"; ε=0.95)              # fixed effectiveness
   hx = HeatExchanger("Cooler"; UA=1200.0)          # ε from UA [W/K]
   add_hx_pair!(net, hx, hot_inlet_port, cold_inlet_port)
+
+Design → off-design workflow (recuperator):
+  recup = HeatExchanger("Recup"; ε=0.95)
+  solve!(net)                # design solve, fixed ε
+  size_UA!(recup)            # invert ε-NTU at design state → :scaled_UA
+  solve!(net)                # off-design: ε now responds to flows
 """
 mutable struct HeatExchanger{T<:Real} <: AbstractElement
     name::String
-    ε::T           # effectiveness (0–1); recomputed each pass in :UA mode
-    UA::T          # overall conductance [W/K] (:UA mode)
-    mode::Symbol   # :effectiveness or :UA
+    ε::T           # effectiveness (0–1); recomputed each pass in :UA/:scaled_UA modes
+    UA::T          # overall conductance [W/K] (:UA); design value (:scaled_UA)
+    mode::Symbol   # :effectiveness, :UA, or :scaled_UA
+    UA_exp::T      # flow exponent of the film conductances (:scaled_UA)
+    W_hot_des::T   # design-point stream flows [kg/s] (:scaled_UA)
+    W_cold_des::T
     dPqP_hot::T
     dPqP_cold::T
 
@@ -52,14 +72,27 @@ mutable struct HeatExchanger{T<:Real} <: AbstractElement
 end
 
 function HeatExchanger(name::String;
-                       ε         = 0.90,
-                       UA        = nothing,
-                       dPqP_hot  = 0.01,
-                       dPqP_cold = 0.01)
-    mode   = isnothing(UA) ? :effectiveness : :UA
+                       ε          = 0.90,
+                       UA         = nothing,
+                       UA_exp     = 0.8,
+                       W_hot_des  = nothing,
+                       W_cold_des = nothing,
+                       dPqP_hot   = 0.01,
+                       dPqP_cold  = 0.01)
+    isnothing(W_hot_des) == isnothing(W_cold_des) ||
+        error("HeatExchanger \"$name\": give both W_hot_des and W_cold_des or neither")
+    have_refs = !isnothing(W_hot_des)
+    have_refs && isnothing(UA) &&
+        error("HeatExchanger \"$name\": W_hot_des/W_cold_des require UA (the design value)")
+    mode   = isnothing(UA) ? :effectiveness : (have_refs ? :scaled_UA : :UA)
     UA_val = isnothing(UA) ? NaN : UA
-    T = promote_type(typeof(ε), typeof(UA_val), typeof(dPqP_hot), typeof(dPqP_cold))
-    HeatExchanger{T}(name, T(ε), T(UA_val), mode, T(dPqP_hot), T(dPqP_cold),
+    Wh_val = have_refs ? W_hot_des  : NaN
+    Wc_val = have_refs ? W_cold_des : NaN
+    T = promote_type(typeof(ε), typeof(UA_val), typeof(UA_exp),
+                     typeof(Wh_val), typeof(Wc_val),
+                     typeof(dPqP_hot), typeof(dPqP_cold))
+    HeatExchanger{T}(name, T(ε), T(UA_val), mode, T(UA_exp), T(Wh_val), T(Wc_val),
+                     T(dPqP_hot), T(dPqP_cold),
                      nothing, nothing, nothing, nothing)
 end
 
@@ -78,6 +111,31 @@ function _effectiveness_NTU_counterflow(NTU, Cr)
     end
 end
 
+"""
+    _NTU_counterflow(ε, Cr) -> NTU
+
+Inverse of `_effectiveness_NTU_counterflow`: the NTU that yields
+effectiveness ε at capacity ratio Cr in counter-flow.
+"""
+function _NTU_counterflow(ε, Cr)
+    0 < ε < 1 || error("ε-NTU inversion requires 0 < ε < 1, got ε = $ε")
+    if abs(1 - Cr) < 1e-9
+        ε / (1 - ε)
+    else
+        log((1 - ε * Cr) / (1 - ε)) / (1 - Cr)
+    end
+end
+
+"""
+Current overall conductance: the design UA with each stream's film
+conductance scaled as (W/W_des)^UA_exp, side resistances equal at design.
+"""
+function _scaled_UA(hx::HeatExchanger, sh::FluidState, sc::FluidState)
+    r_hot  = (hx.W_hot_des  / sh.W)^hx.UA_exp
+    r_cold = (hx.W_cold_des / sc.W)^hx.UA_exp
+    2 * hx.UA / (r_hot + r_cold)
+end
+
 """Effectiveness used for the current pass (fixed or computed from UA)."""
 function _current_effectiveness(hx::HeatExchanger, sh::FluidState, sc::FluidState)
     hx.mode == :effectiveness && return hx.ε
@@ -87,10 +145,43 @@ function _current_effectiveness(hx::HeatExchanger, sh::FluidState, sc::FluidStat
     C_min  = min(C_hot, C_cold)
     C_max  = max(C_hot, C_cold)
 
-    ε_val = _effectiveness_NTU_counterflow(hx.UA / C_min, C_min / C_max)
+    UA_eff = hx.mode == :scaled_UA ? _scaled_UA(hx, sh, sc) : hx.UA
+    ε_val  = _effectiveness_NTU_counterflow(UA_eff / C_min, C_min / C_max)
     # Store for reporting; in AD context ε_val may be Dual while hx.ε is Float64
     ε_val isa typeof(hx.ε) && (hx.ε = ε_val)
     ε_val
+end
+
+"""
+    size_UA!(hx; UA_exp=hx.UA_exp) -> UA [W/K]
+
+Switch a heat exchanger to `:scaled_UA` mode using the current (converged
+design) inlet states as the design point.  Call after a design `solve!`.
+
+From `:effectiveness` mode, the design UA is found by inverting the
+counter-flow ε-NTU relation at the design capacity rates, so an off-design
+solve at design conditions reproduces the design ε exactly.  From `:UA`
+mode the existing UA is kept and only the design flow references are
+recorded.  Subsequent passes scale UA with stream flows (see `:scaled_UA`).
+"""
+function size_UA!(hx::HeatExchanger; UA_exp = hx.UA_exp)
+    (isnothing(hx.hot_inlet) || isnothing(hx.cold_inlet)) &&
+        error("size_UA!($(hx.name)): inlet states not set — solve the design point first")
+    sh = hx.hot_inlet[]
+    sc = hx.cold_inlet[]
+
+    if hx.mode == :effectiveness
+        C_hot  = sh.W * cp(sh.fluid, sh.Tt, sh.Pt)
+        C_cold = sc.W * cp(sc.fluid, sc.Tt, sc.Pt)
+        C_min  = min(C_hot, C_cold)
+        NTU    = _NTU_counterflow(hx.ε, C_min / max(C_hot, C_cold))
+        hx.UA  = NTU * C_min
+    end
+    hx.W_hot_des  = sh.W
+    hx.W_cold_des = sc.W
+    hx.UA_exp     = UA_exp
+    hx.mode       = :scaled_UA
+    hx.UA
 end
 
 function _qmax_enthalpy(sh::FluidState, sc::FluidState)

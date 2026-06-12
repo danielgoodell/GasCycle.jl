@@ -171,6 +171,8 @@ end
 function _describe(el::HeatExchanger)
     str = @sprintf("ε=%.4f", _scalar(el.ε))
     el.mode == :UA && (str *= @sprintf(" (UA=%.1f W/K)", _scalar(el.UA)))
+    el.mode == :scaled_UA &&
+        (str *= @sprintf(" (UA_des=%.1f W/K, ∝W^%.2g)", _scalar(el.UA), _scalar(el.UA_exp)))
     isnothing(el.hot_inlet) ||
         (str *= @sprintf("  Q=%.2f kW", _scalar(Q_transferred(el)) / 1e3))
     str

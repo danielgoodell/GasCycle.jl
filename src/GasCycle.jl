@@ -61,7 +61,7 @@ export PerformanceMap, scale_map, query, corrected_speed, corrected_flow
 export read_npss_map, to_performance_map, NPSSMapTable
 
 export Compressor, Turbine, Duct, Shaft, HeatSource, HeatExchanger, Radiator, Splitter, Mixer
-export compute!, compute_hx!, specific_work, pressure_ratio, Q_transferred, Q_rejected, power_balance
+export compute!, compute_hx!, size_UA!, specific_work, pressure_ratio, Q_transferred, Q_rejected, power_balance
 export n_residuals, residuals, indep_vars, set_indep_vars!
 export link!
 

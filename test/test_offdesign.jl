@@ -1,5 +1,6 @@
 using Test
 using GasCycle
+import GasCycle: cp
 
 """
 Off-design map-based operation (NPSS-style formulation).
@@ -241,4 +242,134 @@ end
         @test powers[1] ≈ P_net_des rtol=1e-3
         @test all(diff(powers) .< 0)
     end
+end
+
+@testset "Off-design recuperator effectiveness (scaled UA)" begin
+    # ── ε-NTU inversion round-trips ──────────────────────────────────────────
+    for (NTU, Cr) in ((0.5, 0.3), (3.0, 0.7), (19.0, 1.0), (8.0, 0.96))
+        ε = GasCycle._effectiveness_NTU_counterflow(NTU, Cr)
+        @test GasCycle._NTU_counterflow(ε, Cr) ≈ NTU rtol = 1e-9
+    end
+    @test_throws Exception GasCycle._NTU_counterflow(1.0, 0.5)
+
+    gas = IdealGasFluid(M_molar = 83.8)
+
+    # ── Standalone sizing and scaling (exact analytic expectations) ──────────
+    hx = HeatExchanger("HX"; ε = 0.9, dPqP_hot = 0.0, dPqP_cold = 0.0)
+    hx.hot_inlet  = Port(FluidState(2.0e5, 800.0, 0.6, gas))
+    hx.cold_inlet = Port(FluidState(4.0e5, 400.0, 0.6, gas))
+    UA = size_UA!(hx)
+    @test hx.mode == :scaled_UA
+    # Equal flows, constant cp → Cr = 1, NTU = ε/(1−ε): UA = C·9
+    C = 0.6 * cp(gas, 800.0, 2.0e5)
+    @test UA ≈ 9.0 * C rtol = 1e-12
+
+    # Design flows reproduce the design effectiveness exactly
+    compute_hx!(hx)
+    @test hx.ε ≈ 0.9 rtol = 1e-12
+
+    # Both flows halved: UA ∝ W^0.8, C ∝ W → NTU ∝ W^−0.2 → ε rises
+    hx.hot_inlet  = Port(FluidState(2.0e5, 800.0, 0.3, gas))
+    hx.cold_inlet = Port(FluidState(4.0e5, 400.0, 0.3, gas))
+    compute_hx!(hx)
+    NTU_half = 9.0 * 0.5^(-0.2)
+    @test hx.ε ≈ NTU_half / (1 + NTU_half) rtol = 1e-10
+    @test hx.ε > 0.9
+
+    # Asymmetric: hot flow halved — Colburn recombination of side resistances
+    hx.hot_inlet  = Port(FluidState(2.0e5, 800.0, 0.3, gas))
+    hx.cold_inlet = Port(FluidState(4.0e5, 400.0, 0.6, gas))
+    compute_hx!(hx)
+    UA_eff = 2 * UA / (2.0^0.8 + 1.0)
+    C_min  = 0.3 * cp(gas, 800.0, 2.0e5)
+    @test hx.ε ≈ GasCycle._effectiveness_NTU_counterflow(UA_eff / C_min, 0.5) rtol = 1e-10
+
+    # Constructor guards + direct :scaled_UA construction (rebuild workflow)
+    @test_throws Exception HeatExchanger("Bad"; UA = 100.0, W_hot_des = 1.0)
+    @test_throws Exception HeatExchanger("Bad"; W_hot_des = 1.0, W_cold_des = 1.0)
+    hx2 = HeatExchanger("HX2"; UA = UA, W_hot_des = 0.6, W_cold_des = 0.6,
+                        dPqP_hot = 0.0, dPqP_cold = 0.0)
+    @test hx2.mode == :scaled_UA
+    hx2.hot_inlet  = Port(FluidState(2.0e5, 800.0, 0.6, gas))
+    hx2.cold_inlet = Port(FluidState(4.0e5, 400.0, 0.6, gas))
+    compute_hx!(hx2)
+    @test hx2.ε ≈ 0.9 rtol = 1e-12
+
+    # size_UA! before any solve must fail loudly
+    @test_throws Exception size_UA!(HeatExchanger("Fresh"; ε = 0.9))
+
+    # ── Closed recuperated loop: design → size_UA! → off-design ─────────────
+    T1, P1, W = 300.0, 163.4e3, 0.6
+    PR_c, η_c = 1.9, 0.80
+    η_t       = 0.87
+    ε_recup   = 0.95
+    dPqP_cold, dPqP_hot, dPqP_heat = 0.011, 0.022, 0.027
+    TIT       = 1144.0
+    N_des     = 36_000.0
+    P_exit    = P1 / (1 - dPqP_hot)
+
+    recup = HeatExchanger("Recup"; ε = ε_recup,
+                          dPqP_hot = dPqP_hot, dPqP_cold = dPqP_cold)
+
+    function build_recup_loop(recup; comp_kw = (;), turb_kw = (;), shaft_kw = (;))
+        comp  = Compressor("Comp"; η_poly = η_c, comp_kw...)
+        heat  = HeatSource("Heater"; TtExit = TIT, dPqP = dPqP_heat)
+        turb  = Turbine("Turb"; η_poly = η_t, turb_kw...)
+        shaft = Shaft("Shaft"; shaft_kw...)
+
+        net = FlowNetwork()
+        add!(net, comp, recup, heat, turb)
+        connect!(net, comp => recup => heat => turb => comp)
+        add_shaft!(net, shaft; drives = comp, driven_by = turb)
+        add_hx_pair!(net, recup; hot = turb)
+        set_state!(net, comp; Pt = P1, Tt = T1, W = W, fluid = gas)
+        (net, comp, heat, turb, shaft)
+    end
+
+    # Design solve with fixed ε
+    net_d, comp_d, heat_d, turb_d, shaft_d =
+        build_recup_loop(recup; comp_kw = (PR = PR_c,),
+                         turb_kw = (mode = :pressure_closure, P_exit = P_exit),
+                         shaft_kw = (N = N_des,))
+    sol_d = solve!(net_d)
+    @test sol_d.status == :success
+    P_des  = net_power(sol_d)
+    PR_t_d = pressure_ratio(turb_d)
+
+    UA_recup = size_UA!(recup)
+    @test UA_recup > 0
+    @test recup.W_hot_des == W
+    @test occursin("UA_des=", sprint(summary, sol_d))
+
+    # Maps through the design point, then off-design with the sized recup
+    s_t = turb_d.inlet[]
+    cbase, tbase = synthetic_base_maps()
+    cmap = scale_map(cbase; Nc_des = corrected_speed(N_des, T1),
+                     Wc_des = corrected_flow(W, T1, P1),
+                     PR_des = PR_c, eta_des = η_c, Nc_ref = 0.93, Wc_ref = 0.87)
+    tmap = scale_map(tbase; Nc_des = corrected_speed(N_des, s_t.Tt),
+                     Wc_des = corrected_flow(W, s_t.Tt, s_t.Pt),
+                     PR_des = PR_t_d, eta_des = η_t, Nc_ref = 0.93, Wc_ref = 0.87)
+
+    net_od, comp_od, heat_od, turb_od, shaft_od =
+        build_recup_loop(recup; comp_kw = (map = cmap, mode = :off_design),
+                         turb_kw = (map = tmap, mode = :off_design),
+                         shaft_kw = (N = N_des,))   # alternator-locked speed
+
+    # Off-design solve at design conditions reproduces the design point,
+    # including the design effectiveness (exact ε-NTU round trip).
+    sol_od = solve!(net_od)
+    @test sol_od.status == :success
+    @test recup.ε ≈ ε_recup rtol = 1e-9
+    @test net_power(sol_od) ≈ P_des rtol = 1e-3
+
+    # Reduced loop flow: both recup streams carry 0.8·W_des, so with
+    # constant cp the prediction is exact: NTU = NTU_des · 0.8^−0.2.
+    set_state!(net_od, comp_od; Pt = P1, Tt = T1, W = 0.8 * W, fluid = gas)
+    sol_lo = solve!(net_od)
+    @test sol_lo.status == :success
+    NTU_lo = (ε_recup / (1 - ε_recup)) * 0.8^(-0.2)
+    @test recup.ε ≈ NTU_lo / (1 + NTU_lo) rtol = 1e-9
+    @test recup.ε > ε_recup
+    @test net_power(sol_lo) < P_des
 end

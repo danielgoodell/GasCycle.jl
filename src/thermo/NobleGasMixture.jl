@@ -168,46 +168,75 @@ const _LJ_B_COEFF = (
     -2.381873371203e-04, -8.598245538331e-05, -3.010059754817e-05,
     -1.023600659325e-05, -3.386317224169e-06, -1.091338938251e-06)
 
-"""B*(T*) with T*-derivatives, using a running power (2 pows total):
-the exponents −(2j+1)/4 step by −1/2 each term."""
+# The j-th exponent is e_j = −(2j+1)/4 (j = 0,…), so the derivative sums
+# Σ b·e·T*^(e−1) and Σ b·e(e−1)·T*^(e−2) reuse the same powers with the
+# e factors folded into the coefficients once, at definition time.
+const _LJ_B_COEFF_D1 =
+    ntuple(j -> _LJ_B_COEFF[j] * (-(2j - 1) / 4), length(_LJ_B_COEFF))
+const _LJ_B_COEFF_D2 =
+    ntuple(j -> _LJ_B_COEFF_D1[j] * (-(2j + 3) / 4), length(_LJ_B_COEFF))
+
+"""B*(T*) with T*-derivatives.  The exponents −(2j+1)/4 step by −1/2, so
+with u = T*^(−1/4) the series is u·poly(u²): two sqrts + three Horner
+evaluations (`evalpoly` unrolls the coefficient tuples into muladds)."""
 function _Bstar_LJ2(Ts)
-    t    = Ts^(-1 / 4)         # current term power
-    step = 1 / sqrt(Ts)        # Ts^(−1/2)
-    s = s′ = s″ = zero(Ts)
-    e = -1 / 4
-    for b in _LJ_B_COEFF
-        s  += b * t
-        s′ += b * e * t / Ts
-        s″ += b * e * (e - 1) * t / Ts^2
-        t  *= step
-        e  -= 1 / 2
-    end
-    (s, s′, s″)
+    u = 1 / sqrt(sqrt(Ts))     # Ts^(−1/4) without a libm pow
+    v = u * u                  # Ts^(−1/2)
+    (u * evalpoly(v, _LJ_B_COEFF),
+     u * evalpoly(v, _LJ_B_COEFF_D1) / Ts,
+     u * evalpoly(v, _LJ_B_COEFF_D2) / Ts^2)
 end
 
 const _NA = 6.022045e23   # paper's Avogadro number
 
-function _B12_2(g1::NobleGas, g2::NobleGas, T)
+"""Pair B₁₂ constants (lj, scale, Tscale): LJ series (b0, ε12) for He
+pairs, Prausnitz Eqs. 20-21 (V12, T12) for heavy pairs.  T-independent,
+so the mixture constructor resolves them once."""
+function _pair_B_consts(g1::NobleGas, g2::NobleGas)
     if g1 === HELIUM || g2 === HELIUM
         σ12 = 0.5 * (g1.σ + g2.σ)
-        ε12 = sqrt(g1.εk * g2.εk)
-        b0  = (2π / 3) * _NA * σ12^3            # m³/mol
-        s, s′, s″ = _Bstar_LJ2(T / ε12)
-        (b0 * s, b0 * s′ / ε12, b0 * s″ / ε12^2)
+        (true, (2π / 3) * _NA * σ12^3, sqrt(g1.εk * g2.εk))      # b0 [m³/mol], ε12
     else
-        # Prausnitz combining rules (Eqs. 19-21), validated for heavy pairs
         V1, V2 = _Vstar(g1), _Vstar(g2)
-        V12 = 0.5 * (V1 + V2)                                    # Eq. 20
-        β   = V1 / V2
-        T12 = 4 * sqrt(β) / (1 + β)^2 * sqrt(g1.Tcr * g2.Tcr)    # Eq. 21
-        Ψ, Ψ′, Ψ″ = _ΨB2(T / T12)                                # Eq. 19
-        (V12 * Ψ, V12 * Ψ′ / T12, V12 * Ψ″ / T12^2)
+        β = V1 / V2
+        (false, 0.5 * (V1 + V2),                                 # Eq. 20
+         4 * sqrt(β) / (1 + β)^2 * sqrt(g1.Tcr * g2.Tcr))        # Eq. 21
     end
 end
+
+function _B12_eval(lj::Bool, scale, Tsc, T)
+    Ψ, Ψ′, Ψ″ = lj ? _Bstar_LJ2(T / Tsc) : _ΨB2(T / Tsc)         # Eq. 19
+    (scale * Ψ, scale * Ψ′ / Tsc, scale * Ψ″ / Tsc^2)
+end
+
+_B12_2(g1::NobleGas, g2::NobleGas, T) =
+    _B12_eval(_pair_B_consts(g1, g2)..., T)
 
 _B12(g1::NobleGas, g2::NobleGas, T) = _B12_2(g1, g2, T)[1]
 
 # ── Mixture backend ───────────────────────────────────────────────────────────
+"""
+T,P-independent constants of a fixed gas pair and composition, resolved
+once at construction so the per-call kernels skip them (see
+`_mixture_consts` for the formulas).  The dense-correction prefactors
+depend on x1, so they carry its (possibly Dual) type for mixture-ratio
+sensitivities; the rest are pair-only Float64s.
+"""
+struct MixtureConsts{X<:Real}
+    ljB12::Bool        # He pair: B₁₂ from the LJ series (else Eqs. 19-21)
+    B12scale::Float64  # b0 [m³/mol] (LJ) or V12 (Eq. 20)
+    B12T::Float64      # ε12 [K] (LJ) or T12 (Eq. 21)
+    φc12::Float64      # Eq. 31 mass factors: φ12 = (μ1/μ12)·φc12
+    φc21::Float64
+    λ12f::Float64      # λ12 = λ12f·μ12(T)  (Eq. 36)
+    K11::Float64       # Eq. 35 bracket constants
+    K22::Float64
+    K12::Float64
+    ρrfac::X           # ρr = ρrfac·ρ̂  (0.291·V*mix, Zc = 0.291)
+    μΨfac::X           # dense viscosity: μ = μ0 + μΨfac·Ψμ(ρr)  (Eqs. 23/28)
+    λΨfac::X           # dense conductivity: λ = λ0 + λΨfac·Ψλ(ρr)  (Eq. 33)
+end
+
 """
     NobleGasMixture(gas1, gas2, x1; name) <: FluidProperties
 
@@ -223,7 +252,8 @@ struct NobleGasMixture{X<:Real} <: FluidProperties
     x1::X
     M::X            # mixture molar mass [kg/mol]
     name::String
-    pair::PairTransport   # resolved once: Tables 2-3 lookup for transport
+    pair::PairTransport     # resolved once: Tables 2-3 lookup for transport
+    consts::MixtureConsts{X}
 end
 
 function NobleGasMixture(gas1::NobleGas, gas2::NobleGas, x1::Real;
@@ -231,7 +261,10 @@ function NobleGasMixture(gas1::NobleGas, gas2::NobleGas, x1::Real;
     0 <= ForwardDiff.value(x1) <= 1 ||
         error("NobleGasMixture: x1 must be in [0,1], got $x1")
     M = x1 * gas1.M + (1 - x1) * gas2.M                          # Eq. 22
-    NobleGasMixture(gas1, gas2, promote(x1, M)..., name, _pair_transport(gas1, gas2))
+    x1p, Mp = promote(x1, M)
+    pair = _pair_transport(gas1, gas2)
+    NobleGasMixture(gas1, gas2, x1p, Mp, name, pair,
+                    _mixture_consts(gas1, gas2, x1p, Mp, pair))
 end
 
 NobleGasFluid(gas::NobleGas) = NobleGasMixture(gas, gas, 1.0; name = gas.name)
@@ -263,7 +296,8 @@ function _virial(fp::NobleGasMixture, T)
     x2 = 1 - x1
     B1, B1′, B1″ = _B_pure2(fp.gas1, T)
     B2, B2′, B2″ = _B_pure2(fp.gas2, T)
-    Bx, Bx′, Bx″ = _B12_2(fp.gas1, fp.gas2, T)
+    mc = fp.consts
+    Bx, Bx′, Bx″ = _B12_eval(mc.ljB12, mc.B12scale, mc.B12T, T)
     w11, w12, w22 = x1^2, 2 * x1 * x2, x2^2
     B  = w11 * B1  + w12 * Bx  + w22 * B2
     B′ = w11 * B1′ + w12 * Bx′ + w22 * B2′
@@ -433,43 +467,28 @@ const _Bstar = 1.10   # (paper takes both as 1.10 throughout)
 
 """Dilute mixture viscosity, Sutherland-Wassiljewa (Eqs. 30-31)."""
 function _μ0_mix(fp::NobleGasMixture, T)
-    g1, g2 = fp.gas1, fp.gas2
+    c = fp.consts
     x1 = fp.x1
     x2 = 1 - x1
-    μ1, μ2 = _μ0(g1, T), _μ0(g2, T)
+    μ1, μ2 = _μ0(fp.gas1, T), _μ0(fp.gas2, T)
     μ12 = _μ12(fp.pair, T)
-    m1, m2 = g1.M, g2.M
-    mm  = 2 * m1 * m2 / (m1 + m2)^2
-    φ12 = (μ1 / μ12) * mm * (5 / (3 * _Astar) + m2 / m1)
-    φ21 = (μ2 / μ12) * mm * (5 / (3 * _Astar) + m1 / m2)
+    φ12 = (μ1 / μ12) * c.φc12
+    φ21 = (μ2 / μ12) * c.φc21
     μ1 / (1 + φ12 * x2 / x1) + μ2 / (1 + φ21 * x1 / x2)
 end
 
 """Dilute mixture conductivity, first-order Hirschfelder (Eqs. 34-36)."""
 function _λ0_mix(fp::NobleGasMixture, T)
-    g1, g2 = fp.gas1, fp.gas2
+    c = fp.consts
     x1 = fp.x1
     x2 = 1 - x1
-    λ1, λ2 = _λ0(g1, T), _λ0(g2, T)
-    m1, m2 = g1.M, g2.M
-    m12 = 2 * m1 * m2 / (m1 + m2)                                # harmonic-ish mean
-    λ12 = 3.75 * (_Rg / m12) * _μ12(fp.pair, T) * fp.pair.f      # Eq. 36
-    s   = (m1 + m2)^2 * _Astar
-    L11 = x1^2 / λ1 + x1 * x2 / (2λ12) *
-          (7.5 * m1^2 + 6.25 * m2^2 - 3 * m2^2 * _Bstar + 4 * m1 * m2 * _Astar) / s
-    L22 = x2^2 / λ2 + x1 * x2 / (2λ12) *
-          (7.5 * m2^2 + 6.25 * m1^2 - 3 * m1^2 * _Bstar + 4 * m1 * m2 * _Astar) / s
-    L12 = -x1 * x2 / (2λ12) * (m1 * m2 / s) * (55 / 4 - 3 * _Bstar - 4 * _Astar)
+    λ1, λ2 = _λ0(fp.gas1, T), _λ0(fp.gas2, T)
+    λ12 = c.λ12f * _μ12(fp.pair, T)                              # Eq. 36
+    w   = x1 * x2 / (2λ12)
+    L11 = x1^2 / λ1 + w * c.K11
+    L22 = x2^2 / λ2 + w * c.K22
+    L12 = -w * c.K12
     (x1^2 * L22 - 2 * x1 * x2 * L12 + x2^2 * L11) / (L11 * L22 - L12^2)
-end
-
-# Pseudo-critical mixing for the dense corrections.  ρr = 0.291·V*·ρ̂: with
-# Zc = 0.291, 0.291·V* is the (pseudo-)critical molar volume, so the Ψ
-# argument is ρ/ρcr.  Viscosity T* uses the linear rule (Eq. 24b); the
-# conductivity T* uses the van der Waals double sum (Eq. 26) with the
-# Eq. 20-21 cross terms.
-function _Vstar_mix(fp::NobleGasMixture)
-    fp.x1 * _Vstar(fp.gas1) + (1 - fp.x1) * _Vstar(fp.gas2)      # Eq. 24a/25
 end
 
 function _mustar(M, Tstar, Vstar)                                # Eq. 23b
@@ -482,57 +501,101 @@ function _lamstar(M, Tstar, Vstar)                               # Eq. 33b
     0.304e-4 * Tstar^0.277 / (M^0.465 * (0.291 * Vstar)^0.415)
 end
 
-"""Pure-gas viscosity (Eq. 2).  He's excess viscosity is nil (Table 1)."""
-function _viscosity_pure(fp::NobleGasMixture, g::NobleGas, T, P)
-    μ = _μ0(g, T)
-    isnan(g.Δμcr) && return μ + zero(_rhom(fp, T, P))   # keep type uniform
-    μ + g.Δμcr * _Ψμ(_rhom(fp, T, P) * g.M / g.ρcr)
-end
+# Pseudo-critical mixing for the dense corrections.  ρr = 0.291·V*·ρ̂: with
+# Zc = 0.291, 0.291·V* is the (pseudo-)critical molar volume, so the Ψ
+# argument is ρ/ρcr.  Viscosity T* uses the linear rule (Eq. 24b); the
+# conductivity T* uses the van der Waals double sum (Eq. 26) with the
+# Eq. 20-21 cross terms.  None of this depends on T or P, so it is all
+# resolved here, once, into the MixtureConsts the per-call kernels read.
+function _mixture_consts(gas1::NobleGas, gas2::NobleGas, x1, M,
+                         pair::PairTransport)
+    x2 = 1 - x1
+    ljB12, B12scale, B12T = _pair_B_consts(gas1, gas2)
 
-"""Pure-gas conductivity (Eq. 6)."""
-function _conductivity_pure(fp::NobleGasMixture, g::NobleGas, T, P)
-    _λ0(g, T) + (1 - 1 / 2.94) * g.λcr * _Ψλ(_rhom(fp, T, P) * g.M / g.ρcr)
-end
+    # dilute-mixture mass factors (Eqs. 31, 35-36)
+    m1, m2 = gas1.M, gas2.M
+    mm   = 2 * m1 * m2 / (m1 + m2)^2
+    φc12 = mm * (5 / (3 * _Astar) + m2 / m1)
+    φc21 = mm * (5 / (3 * _Astar) + m1 / m2)
+    m12  = 2 * m1 * m2 / (m1 + m2)                               # harmonic-ish mean
+    λ12f = 3.75 * (_Rg / m12) * pair.f                           # Eq. 36
+    s    = (m1 + m2)^2 * _Astar
+    K11  = (7.5 * m1^2 + 6.25 * m2^2 - 3 * m2^2 * _Bstar + 4 * m1 * m2 * _Astar) / s
+    K22  = (7.5 * m2^2 + 6.25 * m1^2 - 3 * m1^2 * _Bstar + 4 * m1 * m2 * _Astar) / s
+    K12  = (m1 * m2 / s) * (55 / 4 - 3 * _Bstar - 4 * _Astar)
 
-function viscosity(fp::NobleGasMixture, T, P)
-    g1, g2 = fp.gas1, fp.gas2
-    xv = ForwardDiff.value(fp.x1)
-    (g1 === g2 || xv == 1) && return _viscosity_pure(fp, g1, T, P)
-    xv == 0 && return _viscosity_pure(fp, g2, T, P)
-    μ0 = _μ0_mix(fp, T)
-    V  = _Vstar_mix(fp)
-    ρr = 0.291 * V * _rhom(fp, T, P)
-    if g1 === HELIUM || g2 === HELIUM
+    # dense-correction prefactors
+    V1, V2 = _Vstar(gas1), _Vstar(gas2)
+    V = x1 * V1 + x2 * V2                                        # Eq. 24a/25
+    μΨfac = if gas1 === HELIUM || gas2 === HELIUM
         # Eq. 28: He contributes no excess viscosity (Eq. 27), so the dense
         # correction is the heavy gas's μ*, weighted by its mole fraction.
-        heavy, xh = g1 === HELIUM ? (g2, 1 - fp.x1) : (g1, fp.x1)
-        μstar = _mustar(heavy.M, heavy.Tcr, _Vstar(heavy))
-        return μ0 + 0.565 * xh * μstar * _Ψμ(ρr)
+        heavy, xh = gas1 === HELIUM ? (gas2, x2) : (gas1, x1)
+        0.565 * xh * _mustar(heavy.M, heavy.Tcr, _Vstar(heavy))
+    else
+        VTμ = x1 * V1 * gas1.Tcr + x2 * V2 * gas2.Tcr            # Eq. 24b
+        0.565 * _mustar(M, VTμ / V, V)                           # Eq. 23
     end
-    # Eq. 23 with the Eq. 24 mixing rules
-    x1 = fp.x1
-    VT = x1 * _Vstar(g1) * g1.Tcr + (1 - x1) * _Vstar(g2) * g2.Tcr   # Eq. 24b
-    μ0 + 0.565 * _mustar(fp.M, VT / V, V) * _Ψμ(ρr)
+    V12 = 0.5 * (V1 + V2)                                        # Eq. 20
+    β   = V1 / V2
+    T12 = 4 * sqrt(β) / (1 + β)^2 * sqrt(gas1.Tcr * gas2.Tcr)    # Eq. 21
+    VTλ = x1^2 * V1 * gas1.Tcr + 2 * x1 * x2 * V12 * T12 + x2^2 * V2 * gas2.Tcr
+    λΨfac = (1 - 1 / 2.94) * _lamstar(M, VTλ / V, V)             # Eq. 33
+
+    MixtureConsts(ljB12, B12scale, B12T, φc12, φc21, λ12f, K11, K22, K12,
+                  promote(0.291 * V, μΨfac, λΨfac)...)
+end
+
+"""The single gas when the mixture is degenerate (identical gases or an
+end-member mole fraction), else `nothing`."""
+function _pure_gas(fp::NobleGasMixture)
+    fp.gas1 === fp.gas2 && return fp.gas1
+    xv = ForwardDiff.value(fp.x1)
+    xv == 1 ? fp.gas1 : xv == 0 ? fp.gas2 : nothing
+end
+
+# Kernels over a precomputed molar density, so prandtl (and any future
+# fused transport caller) pays for one virial pass and density root.
+
+"""Pure-gas viscosity (Eq. 2).  He's excess viscosity is nil (Table 1)."""
+_viscosity_pure(g::NobleGas, T, ρ̂) =
+    isnan(g.Δμcr) ? _μ0(g, T) + zero(ρ̂) :              # keep type uniform
+        _μ0(g, T) + g.Δμcr * _Ψμ(ρ̂ * g.M / g.ρcr)
+
+"""Pure-gas conductivity (Eq. 6)."""
+_conductivity_pure(g::NobleGas, T, ρ̂) =
+    _λ0(g, T) + (1 - 1 / 2.94) * g.λcr * _Ψλ(ρ̂ * g.M / g.ρcr)
+
+_viscosity_mix(fp::NobleGasMixture, T, ρ̂) =                      # Eqs. 23/28
+    _μ0_mix(fp, T) + fp.consts.μΨfac * _Ψμ(fp.consts.ρrfac * ρ̂)
+
+_conductivity_mix(fp::NobleGasMixture, T, ρ̂) =                   # Eq. 33
+    _λ0_mix(fp, T) + fp.consts.λΨfac * _Ψλ(fp.consts.ρrfac * ρ̂)
+
+function viscosity(fp::NobleGasMixture, T, P)
+    g = _pure_gas(fp)
+    if g !== nothing
+        # He's viscosity is dilute-only: skip the density solve entirely
+        isnan(g.Δμcr) && return _μ0(g, T) + zero(P * fp.x1)
+        return _viscosity_pure(g, T, _rhom(fp, T, P))
+    end
+    _viscosity_mix(fp, T, _rhom(fp, T, P))
 end
 
 function conductivity(fp::NobleGasMixture, T, P)
-    g1, g2 = fp.gas1, fp.gas2
-    xv = ForwardDiff.value(fp.x1)
-    (g1 === g2 || xv == 1) && return _conductivity_pure(fp, g1, T, P)
-    xv == 0 && return _conductivity_pure(fp, g2, T, P)
-    λ0 = _λ0_mix(fp, T)
-    x1 = fp.x1
-    x2 = 1 - x1
-    V  = _Vstar_mix(fp)
-    # Eq. 26 (van der Waals second rule) with Eq. 20-21 cross terms
-    V1, V2 = _Vstar(g1), _Vstar(g2)
-    V12 = 0.5 * (V1 + V2)                                        # Eq. 20
-    β   = V1 / V2
-    T12 = 4 * sqrt(β) / (1 + β)^2 * sqrt(g1.Tcr * g2.Tcr)        # Eq. 21
-    VT  = x1^2 * V1 * g1.Tcr + 2 * x1 * x2 * V12 * T12 + x2^2 * V2 * g2.Tcr
-    ρr  = 0.291 * V * _rhom(fp, T, P)
-    λ0 + (1 - 1 / 2.94) * _lamstar(fp.M, VT / V, V) * _Ψλ(ρr)    # Eq. 33
+    g = _pure_gas(fp)
+    ρ̂ = _rhom(fp, T, P)
+    g === nothing ? _conductivity_mix(fp, T, ρ̂) : _conductivity_pure(g, T, ρ̂)
 end
 
-prandtl(fp::NobleGasMixture, T, P) =
-    cp(fp, T, P) * viscosity(fp, T, P) / conductivity(fp, T, P)
+"""Pr from one shared virial pass and density root (vs the three full
+property evaluations of the generic fallback)."""
+function prandtl(fp::NobleGasMixture, T, P)
+    B, B′, B″, C, C′, C″ = _virial(fp, T)
+    ρ̂   = _rhom_BC(B, C, T, P)
+    cpv = _cp_molar(B, B′, B″, C, C′, C″, ρ̂, T) / fp.M
+    g   = _pure_gas(fp)
+    μ = g === nothing ? _viscosity_mix(fp, T, ρ̂) : _viscosity_pure(g, T, ρ̂)
+    λ = g === nothing ? _conductivity_mix(fp, T, ρ̂) : _conductivity_pure(g, T, ρ̂)
+    cpv * μ / λ
+end

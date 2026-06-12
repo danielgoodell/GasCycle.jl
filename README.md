@@ -10,7 +10,7 @@ Designed as a clean, extensible reimplementation of the core NPSS cycle-analysis
 ## Features
 
 - **Closed Brayton cycle modeling** — compressor, turbine, recuperator, reactor heat source, ducts, bleed flows (`Splitter`/`Mixer`), and a full cold end (radiator or coolant-loop cooler) so the loop closes physically
-- **Design and off-design analysis** — design-point sizing, then map-based off-design with shaft power balance (`P_load` generator extraction), validated with constant-speed TIT sweeps down to the self-sustain threshold
+- **Design and off-design analysis** — design-point sizing, then map-based off-design with shaft power balance (`P_load` generator extraction), validated with constant-speed TIT sweeps down to the self-sustain threshold; heat-exchanger effectiveness responds to off-design flows via flow-scaled UA (`size_UA!` after the design solve)
 - **Four fluid property backends** (see table below) — including a direct analytic noble-gas backend that needs no property table at all
 - **Transport properties** — μ, k, Pr for all noble gases and binary mixtures, validated against experiment (groundwork for heat-exchanger sizing)
 - **Exact design derivatives** via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) — parametric element types (`Compressor{T<:Real}`, etc.) propagate Dual numbers through the full cycle, including through the Newton solves (implicit function theorem via nested Duals)
@@ -120,7 +120,7 @@ src/
 ├── elements/
 │   ├── Compressor.jl        # compression; :design / :off_design (map) modes
 │   ├── Turbine.jl           # expansion; :design / :pressure_closure / :off_design
-│   ├── HeatExchanger.jl     # ε-NTU counter-flow; fixed-ε or :UA mode (cooler)
+│   ├── HeatExchanger.jl     # ε-NTU counter-flow; fixed-ε, :UA, or :scaled_UA
 │   ├── HeatSource.jl        # reactor / heater; :fixed_Q or :fixed_TtExit
 │   ├── Radiator.jl          # segmented σεA(T⁴−Tsink⁴); :fixed_area / :fixed_TtExit
 │   ├── Duct.jl              # pressure loss only
@@ -159,7 +159,7 @@ Because the Newton uses `AutoForwardDiff()` internally, an outer `ForwardDiff.gr
 |---|---|---|
 | `Compressor` | `PR`, `η_poly`, `map` | `:design`, `:off_design` (map) |
 | `Turbine` | `PR`, `η_poly`, `P_exit`, `map` | `:design`, `:pressure_closure`, `:off_design` |
-| `HeatExchanger` | `ε` or `UA`, `dPqP_hot`, `dPqP_cold` | fixed-ε or `:UA` (ε-NTU each pass) |
+| `HeatExchanger` | `ε` or `UA`, `UA_exp`, `dPqP_hot`, `dPqP_cold` | fixed-ε, `:UA` (ε-NTU each pass), `:scaled_UA` (UA ∝ W^0.8 from design point via `size_UA!`) |
 | `HeatSource` | `Q`, `TtExit`, `dPqP` | `:fixed_Q`, `:fixed_TtExit` |
 | `Radiator` | `A`, `emissivity`, `T_sink`, `TtExit`, `N_seg` | `:fixed_TtExit` (sizing), `:fixed_area` (off-design) |
 | `Duct` | `dPqP` | — |
@@ -189,4 +189,4 @@ Tests cover thermodynamics and transport (with literature oracles), individual e
 
 ## Status
 
-Design-point and map-based off-design analysis are complete and validated against NPSS to print precision. The direct noble-gas property backend (thermo + transport) replaces FPT tables for He-Xe work. Next on the roadmap (`ROADMAP.md`): inventory (charge-pressure) control with per-component volume bookkeeping, off-design recuperator effectiveness from scaled UA, and transients — shaft dynamics first, then thermal capacitance.
+Design-point and map-based off-design analysis are complete and validated against NPSS to print precision. The direct noble-gas property backend (thermo + transport) replaces FPT tables for He-Xe work. Off-design heat-exchanger effectiveness follows from flow-scaled UA sized at the design point. Next on the roadmap (`ROADMAP.md`): inventory (charge-pressure) control with per-component volume bookkeeping, and transients — shaft dynamics first, then thermal capacitance.
