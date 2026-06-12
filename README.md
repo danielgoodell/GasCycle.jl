@@ -2,6 +2,8 @@
 
 A Julia package for thermodynamic cycle analysis of closed Brayton cycles, with a focus on helium-xenon (He-Xe) working fluid mixtures for space nuclear power systems.
 
+**Documentation:** [user guide](docs/GUIDE.md) · [API reference](docs/REFERENCE.md)
+
 Designed as a clean, extensible reimplementation of the core NPSS cycle-analysis workflow — without the proprietary C++ infrastructure. Two key differentiators:
 
 - **First-class automatic differentiation** — exact design sensitivities come for free, enabling gradient-based optimization over any cycle parameter, including the He-Xe mixture ratio itself.

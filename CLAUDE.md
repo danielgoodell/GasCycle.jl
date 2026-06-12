@@ -54,3 +54,4 @@ Internal computation is **SI everywhere** (K, Pa, J, kg). NPSS models, FPT files
 - `reference/` — the NPSS model being replicated (`BRU3.mdl`, `HeXe.out`), property papers (El-Genk AIAA 2006-4154, NASA TN D-5815), and `HeXe84.fpt`/`Oil.fpt`/`H2O.fpt` at repo root.
 - `validation/PLAN.md` + `validation/RESULTS.md` — the NPSS cross-validation ladder and its findings ledger. New discrepancies against NPSS should be logged there, not just fixed silently.
 - `ROADMAP.md` — ordered next steps (inventory control, transients, additional working fluids).
+- `docs/GUIDE.md` + `docs/REFERENCE.md` — user-facing guide and API reference. The reference lists every exported function and element option — keep it in sync when changing public API.
