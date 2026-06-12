@@ -199,7 +199,7 @@ function build_suite!()
     x0_b = [2.5, 1100.0]
     backends = (
         "idealgas" => IdealGasFluid(M_molar=83.8),
-        "fpt"      => FPTFluid(joinpath(dirname(@__DIR__), "HeXe84.fpt")),
+        "fpt"      => FPTFluid(joinpath(dirname(@__DIR__), "data", "HeXe84.fpt")),
         "noblegas" => HeXe(83.8),
     )
     for (key, fluid) in backends

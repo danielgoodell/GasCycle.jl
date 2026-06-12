@@ -19,9 +19,9 @@ using GasCycle
 using Printf
 
 const root = joinpath(@__DIR__, "..")
-fpt   = FPTFluid(joinpath(root, "HeXe84.fpt"))
+fpt   = FPTFluid(joinpath(root, "data", "HeXe84.fpt"))
 ideal = IdealGasFluid(M_molar = 83.8)
-oil   = ConstantPropertyLiquid(joinpath(root, "Oil.fpt"))   # BRU3 "Oil" (Dow 200)
+oil   = ConstantPropertyLiquid(joinpath(root, "data", "Oil.fpt"))   # BRU3 "Oil" (Dow 200)
 
 toR(T_K)     = K_to_R(T_K)
 topsia(P_Pa) = Pa_to_psia(P_Pa)

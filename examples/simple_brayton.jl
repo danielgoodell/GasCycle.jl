@@ -18,7 +18,7 @@ using GasCycle
 fluid = HeXeIdealGas(0.47)   # ~47% He by mole → M ≈ 71.5 g/mol
 
 # For the FPT-based version, use:
-# fluid = FPTFluid(joinpath(@__DIR__, "..", "HeXe84.fpt"))
+# fluid = FPTFluid(joinpath(@__DIR__, "..", "data", "HeXe84.fpt"))
 
 # ── Cycle parameters ────────────────────────────────────────────────────────────
 T_in   = 400.0    # K  compressor inlet temperature

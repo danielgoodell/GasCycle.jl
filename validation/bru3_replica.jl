@@ -33,7 +33,7 @@ M_He, M_Xe = 4.002602, 131.293
 w_He  = 0.0181                                  # CEAT.fpt: Wreac1
 M_mix = 1 / (w_He / M_He + (1 - w_He) / M_Xe)   # 83.328 g/mol
 fluid = IdealGasFluid(M_molar = M_mix)
-oil   = ConstantPropertyLiquid(joinpath(@__DIR__, "..", "Oil.fpt"))  # Dow 200
+oil   = ConstantPropertyLiquid(joinpath(@__DIR__, "..", "data", "Oil.fpt"))  # Dow 200
 
 # ── BRU3.mdl parameters ───────────────────────────────────────────────────────
 T0, P0 = R_to_K(540.0), psia_to_Pa(23.7)

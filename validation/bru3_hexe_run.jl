@@ -25,7 +25,7 @@ import GasCycle: cp
 using Printf
 
 const root = joinpath(@__DIR__, "..")
-oil = ConstantPropertyLiquid(joinpath(root, "Oil.fpt"))
+oil = ConstantPropertyLiquid(joinpath(root, "data", "Oil.fpt"))
 
 T0, P0 = R_to_K(540.0), psia_to_Pa(23.7)
 W      = lbps_to_kgps(1.32)
@@ -45,8 +45,8 @@ for (lbl, Tt_R, Pt_psia, ht_n, s_n, gam_n) in
      ("st1 (751.47, 45.030)",  751.47, 45.030,  74.03, 0.286, 1.66880),
      ("st5 (2024.04, 43.332)", 2024.04, 43.332, 149.31, 0.345, 1.66778),
      ("st7 (1624.41, 24.660)", 1624.41, 24.660, 125.70, 0.346, 1.66746))
-    for (mode, fl) in (("linear", FPTFluid(joinpath(root, "HeXe84.fpt"); s_interp = :linear)),
-                       ("log_p",  FPTFluid(joinpath(root, "HeXe84.fpt"))))
+    for (mode, fl) in (("linear", FPTFluid(joinpath(root, "data", "HeXe84.fpt"); s_interp = :linear)),
+                       ("log_p",  FPTFluid(joinpath(root, "data", "HeXe84.fpt"))))
         T, P = R_to_K(Tt_R), psia_to_Pa(Pt_psia)
         @printf("%-26s %-6s %9.2f %9.2f %9.4f %9.3f %9.5f\n", lbl, mode,
                 Jkg_to_btulbm(enthalpy(fl, T, P)), ht_n,
@@ -129,8 +129,8 @@ function gascycle_row(m)
     )
 end
 
-m_lin = build_and_solve(FPTFluid(joinpath(root, "HeXe84.fpt"); s_interp = :linear))
-m_log = build_and_solve(FPTFluid(joinpath(root, "HeXe84.fpt")))
+m_lin = build_and_solve(FPTFluid(joinpath(root, "data", "HeXe84.fpt"); s_interp = :linear))
+m_log = build_and_solve(FPTFluid(joinpath(root, "data", "HeXe84.fpt")))
 g_lin, g_log = gascycle_row(m_lin), gascycle_row(m_log)
 
 println("\n[1] Full-loop comparison vs HeXe.out (NPSS-compat :linear and physical :log_pressure)")
@@ -199,7 +199,7 @@ function build_and_solve_npss_faithful(fluid)
     (; sol, comp, recup, heater, turb, bmix, sink, shaft)
 end
 
-f = build_and_solve_npss_faithful(FPTFluid(joinpath(root, "HeXe84.fpt"); s_interp = :linear))
+f = build_and_solve_npss_faithful(FPTFluid(joinpath(root, "data", "HeXe84.fpt"); s_interp = :linear))
 @printf("%-44s %10s %10s %8s\n", "quantity", "GasCycle", "NPSS", "Δ")
 rule()
 for (lbl, gc, np) in (

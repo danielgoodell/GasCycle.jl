@@ -36,7 +36,7 @@ using Pkg; Pkg.activate(joinpath(@__DIR__, ".."))
 using GasCycle
 
 # ── Fluid ──────────────────────────────────────────────────────────────────────
-fpt_path = joinpath(@__DIR__, "..", "HeXe84.fpt")
+fpt_path = joinpath(@__DIR__, "..", "data", "HeXe84.fpt")
 fluid = FPTFluid(fpt_path)   # M = 83.8 g/mol, matches BRU design spec
 println("Fluid: $(fluid.name)  (M ≈ 83.8 g/mol)")
 

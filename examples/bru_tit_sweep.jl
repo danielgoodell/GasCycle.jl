@@ -11,7 +11,7 @@ using GasCycle
 function run_bru_tit_sweep(; TIT_range_R = range(1460.0, 2060.0, length = 25),
                            print_rows::Bool = true)
     # ── Fluid ─────────────────────────────────────────────────────────────────
-    fpt_path = joinpath(@__DIR__, "..", "HeXe84.fpt")
+    fpt_path = joinpath(@__DIR__, "..", "data", "HeXe84.fpt")
     fluid    = FPTFluid(fpt_path)
 
     # Unit helpers (R_to_K, K_to_R, psia_to_Pa, lbps_to_kgps, …) are exported by GasCycle.

@@ -63,7 +63,7 @@ using GasCycle
     # table's own h and s, and sanity-check against the ideal-gas closed form
     # (HeXe84.fpt deviates from ideal monatomic by ~2% on the temperature
     # rise at these conditions, so only a loose agreement is expected).
-    fpt = FPTFluid(joinpath(@__DIR__, "..", "HeXe84.fpt"))
+    fpt = FPTFluid(joinpath(@__DIR__, "..", "data", "HeXe84.fpt"))
     c = Compressor("C"; PR = 1.9, η_poly = 0.80, η_type = :isentropic)
     compute!(c, Port(FluidState(163.4e3, 300.0, 0.6, fpt)))
     s_in  = entropy(fpt, 300.0, 163.4e3)

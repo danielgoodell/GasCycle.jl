@@ -8,7 +8,7 @@ UA-mode (ε-NTU) heat exchanger, Radiator element, and loop closure through
 the cold end so the compressor inlet state responds to the operating point.
 """
 
-const _FPT_DIR = joinpath(@__DIR__, "..")
+const _FPT_DIR = joinpath(@__DIR__, "..", "data")
 
 @testset "ConstantPropertyLiquid backend" begin
     water = ConstantPropertyLiquid(joinpath(_FPT_DIR, "H2O.fpt"))

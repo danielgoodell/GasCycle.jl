@@ -50,13 +50,13 @@ summary(sol)   # NPSS-style station + component + cycle tables
 | Backend | Source | Real-gas | Transport (μ, k, Pr) | AD |
 |---|---|---|---|---|
 | `NobleGasMixture` / `HeXe(M)` / `NobleGasFluid(gas)` | analytic — virial EOS + corresponding-states transport (Tournier/El-Genk AIAA 2006-4154) | yes | yes | full, incl. d/d(mixture ratio) |
-| `FPTFluid("HeXe84.fpt")` | NPSS FPT table files (T-P grids; forward + inverse tables) | yes (whatever the table encodes) | no (FPT files don't carry μ/k) | full |
+| `FPTFluid("data/HeXe84.fpt")` | NPSS FPT table files (T-P grids; forward + inverse tables) | yes (whatever the table encodes) | no (the reader skips the μ/k/Pr tables present in HeXe84.fpt) | full |
 | `IdealGasFluid` / `HeXeIdealGas(x_He)` | constant-cp monatomic ideal gas | no | no | full (closed form) |
-| `ConstantPropertyLiquid` | constant cp/ρ coolants; reads function-style FPT files (`H2O.fpt`, `Oil.fpt`) | — | no | full |
+| `ConstantPropertyLiquid` | constant cp/ρ coolants; reads function-style FPT files (`data/H2O.fpt`, `data/Oil.fpt`) | — | no | full |
 
 The direct `NobleGasMixture` backend covers all five noble gases (He, Ne, Ar, Kr, Xe — `NobleGasFluid(ARGON)`, etc.) and their ten binary mixtures at any composition, with no table generation step. Thermodynamics come from the virial EOS (Eqs. 8–22 of the paper), transport from data-fitted pair correlations (Eqs. 2–7, 23–36); mixture Prandtl numbers match Taylor's 1988 He-Xe experiments to ≤1.1%. It is the convenient default; scalar calls are allocation-free and a full design solve costs ~1.4 ms vs ~0.3 ms with FPT tables (see `benchmarks/`).
 
-Keep the FPT reader for cross-validation: reading the literal file the collaborator feeds NPSS is the cleanest apples-to-apples comparison available. The included `HeXe84.fpt` covers the BRU design composition (M = 83.8 kg/kmol).
+Keep the FPT reader for cross-validation: reading the literal file the collaborator feeds NPSS is the cleanest apples-to-apples comparison available. The included `data/HeXe84.fpt` covers the BRU design composition (audited M ≈ 84.07 kg/kmol; provenance and a fidelity audit are in `data/README.md`).
 
 ## Design sensitivity with ForwardDiff
 

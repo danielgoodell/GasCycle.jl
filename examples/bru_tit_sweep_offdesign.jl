@@ -22,7 +22,7 @@ using Pkg; Pkg.activate(joinpath(@__DIR__, ".."))
 using GasCycle
 
 # ── Fluid ─────────────────────────────────────────────────────────────────────
-fpt_path = joinpath(@__DIR__, "..", "HeXe84.fpt")
+fpt_path = joinpath(@__DIR__, "..", "data", "HeXe84.fpt")
 fluid    = FPTFluid(fpt_path)
 
 # Unit helpers (R_to_K, K_to_R, psia_to_Pa, lbps_to_kgps, …) are exported by GasCycle.

@@ -97,7 +97,7 @@ end
 end
 
 @testset "NobleGasMixture — vs HeXe84.fpt at cycle conditions" begin
-    fpt_path = joinpath(@__DIR__, "..", "HeXe84.fpt")
+    fpt_path = joinpath(@__DIR__, "..", "data", "HeXe84.fpt")
     if !isfile(fpt_path)
         @warn "HeXe84.fpt not found; skipping comparison"
     else

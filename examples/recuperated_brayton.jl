@@ -14,7 +14,7 @@ using Pkg; Pkg.activate(joinpath(@__DIR__, ".."))
 using GasCycle
 
 # ── Fluid ──────────────────────────────────────────────────────────────────────
-fpt_path = joinpath(@__DIR__, "..", "HeXe84.fpt")
+fpt_path = joinpath(@__DIR__, "..", "data", "HeXe84.fpt")
 fluid = isfile(fpt_path) ? FPTFluid(fpt_path) : HeXeIdealGas(0.47)
 println("Using fluid: ", fluid isa FPTFluid ? fluid.name : "HeXe ideal gas")
 

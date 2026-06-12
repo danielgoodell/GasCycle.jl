@@ -44,7 +44,7 @@ import GasCycle: cp   # explicit import to avoid ambiguity with Base.Filesystem.
 end
 
 @testset "FPTFluid — HeXe84.fpt" begin
-    fpt_path = joinpath(@__DIR__, "..", "HeXe84.fpt")
+    fpt_path = joinpath(@__DIR__, "..", "data", "HeXe84.fpt")
     if !isfile(fpt_path)
         @warn "HeXe84.fpt not found; skipping FPT tests"
     else

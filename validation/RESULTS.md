@@ -258,3 +258,28 @@ i.e. NPSS's converged TIT is ~59 °R below the physically-consistent value
 because of its s-table interpolation. For mission work (SR-1 off-design,
 inventory, transients) GasCycle's default mode is the one to trust;
 `:linear` is for NPSS cross-checks.
+
+## 2026-06-11 — HeXe84.fpt provenance + content audit (files moved to data/)
+
+HeXe84.fpt, Oil.fpt, H2O.fpt moved from repo root to `data/` (all code
+references updated). Provenance recorded in `data/README.md`: HeXe84.fpt was
+generated 2026 by Joel Krakower (NASA) using the same methods as
+NobleGasMixture.jl (Tournier/El-Genk AIAA 2006-4154 thermo; Johnson
+NASA/CR-2006-214394 transport). Audit findings vs the analytic backend:
+
+- **Table composition is M ≈ 84.07 kg/kmol, not 83.8** (R/Cp/Cv tables
+  self-consistent at the ideal corner: 0.02362 BTU/(lbm·R) ↔ 84.08).
+  Supersedes the rung-0 "fitted R 99.27 J/(kg·K)" reading; mid-grid
+  ds/dlnP measures −98.88, matching the R table.
+- **h_T/s_T/rho/mu/k confirm same-methods provenance**: vs HeXe(84.07),
+  Δh ≤ 0.05 %, ρ ≤ 0.35 % (285–1340 K, 20–310 kPa); μ ≤ 0.06 % and
+  k ≤ 0.9 % across the full grid.
+- **Cp/gam/Pr tables carry a wrong-signed real-gas departure**:
+  Cp_table ≈ Cp_ideal − 0.75·δ where the virial method and the file's own
+  h_T table (dh/dT) give Cp_ideal + δ. ≤ 0.6 % at BRU conditions; −42 % at
+  250 K / 3 MPa. The file's Cp is *not* ∂(h_T)/∂T — internally inconsistent.
+  To be flagged to the table author. GasCycle solves are h/s-based and
+  unaffected at cycle conditions.
+- Oil.fpt vs Dow Corning 200 resolved (see data/README.md): cp 0.8 and
+  ρ = water do not match DC-200 (cp 0.37–0.50 BTU/(lbm·R), SG 0.87–0.97);
+  file kept byte-identical because HeXe.out verifiably used cp = 0.8.

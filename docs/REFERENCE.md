@@ -17,7 +17,7 @@ care which one they're given.
 | `FPTFluid(path; bounds=:error, s_interp=:log_pressure)` | NPSS FPT table file | `s_interp=:linear` reproduces NPSS's linear-in-P entropy interpolation (for exact NPSS replication only) |
 | `IdealGasFluid(; M_molar)` | constant-cp monatomic ideal gas | exact closed-form inversions |
 | `HeXeIdealGas(x_He)` | same, He-Xe by He mole fraction | |
-| `ConstantPropertyLiquid(; cp, rho, name="liquid")` | constant-property coolant | also `ConstantPropertyLiquid(path)` for function-style FPT files (`H2O.fpt`, `Oil.fpt`) |
+| `ConstantPropertyLiquid(; cp, rho, name="liquid")` | constant-property coolant | also `ConstantPropertyLiquid(path)` for function-style FPT files (`data/H2O.fpt`, `data/Oil.fpt`) |
 
 The analytic `NobleGasMixture` family (virial EOS + corresponding-states
 transport, Tournier/El-Genk AIAA 2006-4154) is the default choice for He-Xe:
