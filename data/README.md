@@ -48,6 +48,35 @@ comes from `NobleGasMixture`.
   to the table's author before using `Cp`/`gam`/`Pr` columns at high
   pressure and low temperature.
 
+## Water.fpt, DC200.fpt, WaterEG50.fpt — temperature-dependent coolants
+
+Generated 2026-06-12 for the `PolynomialLiquid` backend: NPSS function-style
+files whose `Cp`, `rho` (and where available `mu`, `k`) functions return
+polynomials in Tt [°R] (English units). The `h_T`/`T_h` functions make them
+self-consistent for NPSS use (h = ∫cp dT, Newton inverse). Each file header
+lists its sources, validity range, and fit residuals.
+
+- **Water.fpt** — liquid water, 273–373 K. Fit to CRC/IAPWS values every
+  10 °C: cp cubic (≤0.10%), ρ cubic (≤0.02%), k quadratic (≤0.13%),
+  μ quartic (≤2.4% — a polynomial chasing Arrhenius behavior; use with that
+  caveat).
+- **DC200.fpt** — Dow Corning 200 silicone (PDMS), **2.0 cSt grade**, the
+  actual BRU heat-sink coolant (NASA CR-120816 specifies "DC-200, 2.0 cSt
+  at 25 °C"). cp = 1716 J/(kg·K) at 25 °C (Clearco PSF-2cSt TDS: 0.410
+  cal/g·°C) with the Dow low-viscosity-grade slope (+2.5 J/(kg·K) per K);
+  ρ = 873 kg/m³ at 25 °C with expansion 1.16×10⁻³ 1/K; k held constant at
+  the 25 °C value 0.109 W/(m·K) (no published T-dependence); μ omitted.
+  233–423 K.
+- **WaterEG50.fpt** — water/ethylene glycol **50/50 by mass** (freeze
+  ≈ −36 °C), 243–373 K. cp linear per Melinder (2010)-consistent data:
+  cp = 3247 + 3.25·T(°C) J/(kg·K) — note vendor (inhibited-glycol) tables
+  run ~4% higher; ρ quadratic through the Dow-derived vendor SG table
+  (1088 kg/m³ at −17.8 °C … 1038 at 71.1 °C, fit ≤0.09%); k approximate
+  linear (~0.40 W/(m·K) at 20 °C); μ omitted (strongly non-polynomial).
+
+These supersede `H2O.fpt`/`Oil.fpt` for physical modeling; the two legacy
+files remain only for NPSS replication (below).
+
 ## H2O.fpt
 
 Function-style constant-property file: Cp = 1.0 BTU/(lbm·°R),
@@ -71,5 +100,4 @@ spreadsheet listed yet another value (0.884 BTU/(lbm·°R), labeled
 (2026-06-10 entries). The NPSS `HeXe.out` run verifiably used 0.8
 (its oil-side energy balance gives ht = 0.8·T exactly), so this file is kept
 byte-identical — and under its NPSS name — for replication. Do not "fix" it;
-a physically-correct DC-200 coolant should be a new file or a
-`ConstantPropertyLiquid(cp=..., rho=...)` constructed directly.
+the physically-correct DC-200 coolant is `DC200.fpt` (above).

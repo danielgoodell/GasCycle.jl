@@ -1,0 +1,45 @@
+// DC200.fpt — Dow Corning 200 silicone fluid (PDMS), 2.0 cSt grade — BRU heat-sink coolant (NASA CR-120816)
+// Generated 2026-06-12 by GasCycle (see data/README.md for fit anchors).
+// Source: Clearco PSF-2cSt TDS (cp 0.410 cal/gC, rho 0.873 g/cm3, k 0.109 W/mK at 25 C)
+// Source: Dow 'Typical properties of Dow silicone fluids' (cp slope, expansion coefficient)
+// Valid Tt = 420–762 R (233–423 K). Pressure does not enter (liquid).
+// Units: Tt [R], Cp [BTU/(lbm·R)], rho [lbm/ft3], h [BTU/lbm], k [BTU/(ft·s·R)]
+// cp/rho linear in T; k held at the 25 C value (no published T-dependence); mu omitted.
+
+indeps   = {"Tt", "Pt"};
+hTindeps = {"Tt", "Pt"};
+ThIndeps = {"ht", "Pt"};
+
+real Cp( real T, real P ){
+
+	return Cpt( T );
+}
+
+real Cpt( real T ){
+	return 2.3106509697e-01
+	       + 3.3333333333e-04 * T;
+}
+
+real rho( real T, real P ){
+	return 7.3348517556e+01
+	       + -3.5121970620e-02 * T;
+}
+
+real h_T( real T, real P ){
+	return 2.3106509697e-01 * T
+	       + 1.6666666667e-04 * T * T;
+}
+
+real T_h( real ht, real P ){
+	real T = 540.;
+	real iter = 0.;
+	do {
+		T = T - ( h_T( T, P ) - ht ) / Cpt( T );
+		iter = iter + 1.;
+	} while ( iter < 8. );
+	return T;
+}
+
+real k( real T, real P ){
+	return 1.7494176529e-05;
+}

@@ -52,7 +52,8 @@ summary(sol)   # NPSS-style station + component + cycle tables
 | `NobleGasMixture` / `HeXe(M)` / `NobleGasFluid(gas)` | analytic — virial EOS + corresponding-states transport (Tournier/El-Genk AIAA 2006-4154) | yes | yes | full, incl. d/d(mixture ratio) |
 | `FPTFluid("data/HeXe84.fpt")` | NPSS FPT table files (T-P grids; forward + inverse tables) | yes (whatever the table encodes) | no (the reader skips the μ/k/Pr tables present in HeXe84.fpt) | full |
 | `IdealGasFluid` / `HeXeIdealGas(x_He)` | constant-cp monatomic ideal gas | no | no | full (closed form) |
-| `ConstantPropertyLiquid` | constant cp/ρ coolants; reads function-style FPT files (`data/H2O.fpt`, `data/Oil.fpt`) | — | no | full |
+| `PolynomialLiquid` | coolants with polynomial cp(T)/ρ(T)/μ(T)/k(T); reads function-style FPT files (`data/Water.fpt`, `data/DC200.fpt`, `data/WaterEG50.fpt`) | — | where the file provides μ/k | full |
+| `ConstantPropertyLiquid` | constant cp/ρ coolants; reads the legacy NPSS-replication files (`data/H2O.fpt`, `data/Oil.fpt`) | — | no | full |
 
 The direct `NobleGasMixture` backend covers all five noble gases (He, Ne, Ar, Kr, Xe — `NobleGasFluid(ARGON)`, etc.) and their ten binary mixtures at any composition, with no table generation step. Thermodynamics come from the virial EOS (Eqs. 8–22 of the paper), transport from data-fitted pair correlations (Eqs. 2–7, 23–36); mixture Prandtl numbers match Taylor's 1988 He-Xe experiments to ≤1.1%. It is the convenient default; scalar calls are allocation-free and a full design solve costs ~1.4 ms vs ~0.3 ms with FPT tables (see `benchmarks/`).
 

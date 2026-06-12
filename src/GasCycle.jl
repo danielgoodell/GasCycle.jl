@@ -8,6 +8,7 @@ include("thermo/FluidProperties.jl")
 include("thermo/IdealGasFluid.jl")
 include("thermo/FPTFluid.jl")
 include("thermo/ConstantPropertyLiquid.jl")
+include("thermo/PolynomialLiquid.jl")
 include("thermo/NobleGasMixture.jl")
 
 # ── Core abstractions ─────────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ export btulbm_to_Jkg, Jkg_to_btulbm, btulbmR_to_JkgK, JkgK_to_btulbmR
 export lbmft3_to_kgm3, kgm3_to_lbmft3, rpm_to_radps, radps_to_rpm
 export hp_to_W, W_to_hp
 
-export FluidProperties, IdealGasFluid, HeXeIdealGas, FPTFluid, ConstantPropertyLiquid
+export FluidProperties, IdealGasFluid, HeXeIdealGas, FPTFluid, ConstantPropertyLiquid, PolynomialLiquid
 export NobleGas, NobleGasMixture, NobleGasFluid, HeXe
 export HELIUM, NEON, ARGON, KRYPTON, XENON
 # Note: `cp` is not exported to avoid conflict with Base.Filesystem.cp in Julia ≥ 1.12.

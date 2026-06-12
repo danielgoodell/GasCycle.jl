@@ -168,5 +168,6 @@ turbomachine's map with its operating point.
 - `connect!(net, a => ... => a)` repeats the first element to close the loop;
   the closing edge is stripped — the loop is actually closed by `set_state!`
   or an explicit back-edge.
-- Transport properties (`viscosity`, `conductivity`, `prandtl`) are only
-  available on the `NobleGasMixture` backend; FPT tables don't carry them.
+- Transport properties (`viscosity`, `conductivity`, `prandtl`) are available
+  on `NobleGasMixture` (gases) and on `PolynomialLiquid` coolants whose file
+  carries μ/k data; the FPT *table* reader doesn't load them.

@@ -78,6 +78,18 @@ OTAC (Jones, NASA Glenn). Scope notes:
 
 ## Backlog (lower priority)
 
+- **Native fluid-definition format + conversion utilities** (deferred with
+  trigger, 2026-06-12): one declarative TOML per fluid (kind, SI
+  coefficients, validity range, machine-readable provenance/fit residuals)
+  loaded by a single `load_fluid(path)`; a generic sample-and-fit importer
+  (evaluate any oracle — CoolProp.jl, REFPROP dump, FPT table, collaborator
+  script — on a grid, fit to the native representation, stamp residuals);
+  FPT demoted to a pure export target regenerated for NPSS
+  (`data/generate_liquids.jl` becomes the export half). CoolProp stays a
+  generation-time oracle only, never a runtime dependency, so AD-exactness
+  is preserved. Build when any trigger hits: coolant library grows past
+  ~5 fluids, a third consumer tool appears, or a fluid needs re-fitting and
+  the anchors aren't machine-readable.
 - **NPSS map reader cross-check**: `read_npss_map` was validated against a
   synthetic format-faithful fixture only — cross-check against a real NPSS
   map when one is available. Maps operated near choke (vertical speed-line

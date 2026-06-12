@@ -17,7 +17,8 @@ care which one they're given.
 | `FPTFluid(path; bounds=:error, s_interp=:log_pressure)` | NPSS FPT table file | `s_interp=:linear` reproduces NPSS's linear-in-P entropy interpolation (for exact NPSS replication only) |
 | `IdealGasFluid(; M_molar)` | constant-cp monatomic ideal gas | exact closed-form inversions |
 | `HeXeIdealGas(x_He)` | same, He-Xe by He mole fraction | |
-| `ConstantPropertyLiquid(; cp, rho, name="liquid")` | constant-property coolant | also `ConstantPropertyLiquid(path)` for function-style FPT files (`data/H2O.fpt`, `data/Oil.fpt`) |
+| `PolynomialLiquid(; cp, rho, mu=[], k=[], name, T_min, T_max)` | coolant with polynomial T-dependence | coefficients ascending in T [K], scalars = constant; `PolynomialLiquid(path)` reads `data/Water.fpt`, `data/DC200.fpt`, `data/WaterEG50.fpt` |
+| `ConstantPropertyLiquid(; cp, rho, name="liquid")` | constant-property coolant | also `ConstantPropertyLiquid(path)` for the legacy NPSS-replication files (`data/H2O.fpt`, `data/Oil.fpt`) |
 
 The analytic `NobleGasMixture` family (virial EOS + corresponding-states
 transport, Tournier/El-Genk AIAA 2006-4154) is the default choice for He-Xe:
@@ -35,9 +36,9 @@ Forward, on any backend (`fl`, `T` [K], `P` [Pa]):
 | `entropy(fl, T, P)` | s [J/(kg·K)] |
 | `density(fl, T, P)` | ρ [kg/m³] |
 | `gamma(fl, T, P)` | cp/cv [-] |
-| `viscosity(fl, T, P)` | μ [Pa·s] — `NobleGasMixture` only |
-| `conductivity(fl, T, P)` | k [W/(m·K)] — `NobleGasMixture` only |
-| `prandtl(fl, T, P)` | Pr [-] — `NobleGasMixture` only |
+| `viscosity(fl, T, P)` | μ [Pa·s] — `NobleGasMixture`; `PolynomialLiquid` when the file has μ data |
+| `conductivity(fl, T, P)` | k [W/(m·K)] — `NobleGasMixture`; `PolynomialLiquid` when the file has k data |
+| `prandtl(fl, T, P)` | Pr [-] — same availability as μ and k |
 
 Inversions (Newton/closed-form per backend; pass `T_guess` when you have one —
 element code always does):

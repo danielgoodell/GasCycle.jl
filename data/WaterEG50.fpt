@@ -1,0 +1,48 @@
+// WaterEG50.fpt — water / ethylene glycol 50/50 by mass (freeze point ~ -36 C)
+// Generated 2026-06-12 by GasCycle (see data/README.md for fit anchors).
+// Source: cp: Melinder 2010 via ASHRAE-consistent linear fit (vendor tables run ~4% higher)
+// Source: rho: Dow-derived vendor SG table (corecheminc.com), quadratic fit
+// Source: k: approximate linear (~0.40 W/mK at 20 C)
+// Valid Tt = 438–672 R (243–373 K). Pressure does not enter (liquid).
+// Units: Tt [R], Cp [BTU/(lbm·R)], rho [lbm/ft3], h [BTU/lbm], k [BTU/(ft·s·R)]
+// mu omitted (strongly non-polynomial); cp basis is mass fraction 0.50, uninhibited.
+
+indeps   = {"Tt", "Pt"};
+hTindeps = {"Tt", "Pt"};
+ThIndeps = {"ht", "Pt"};
+
+real Cp( real T, real P ){
+
+	return Cpt( T );
+}
+
+real Cpt( real T ){
+	return 5.6350016719e-01
+	       + 4.3124953558e-04 * T;
+}
+
+real rho( real T, real P ){
+	return 7.4624266871e+01
+	       + -1.0616231066e-02 * T
+	       + -8.5222769732e-06 * T * T;
+}
+
+real h_T( real T, real P ){
+	return 5.6350016719e-01 * T
+	       + 2.1562476779e-04 * T * T;
+}
+
+real T_h( real ht, real P ){
+	real T = 540.;
+	real iter = 0.;
+	do {
+		T = T - ( h_T( T, P ) - ht ) / Cpt( T );
+		iter = iter + 1.;
+	} while ( iter < 8. );
+	return T;
+}
+
+real k( real T, real P ){
+	return 3.9123960339e-05
+	       + 4.9040759892e-08 * T;
+}

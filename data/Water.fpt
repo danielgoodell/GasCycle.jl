@@ -1,0 +1,60 @@
+// Water.fpt — liquid water at ~1 atm, temperature-dependent polynomial properties
+// Generated 2026-06-12 by GasCycle (see data/README.md for fit anchors).
+// Source: CRC Handbook / IAPWS liquid-water values, fit anchors every 10 C, 0-100 C
+// Valid Tt = 492–672 R (273–373 K). Pressure does not enter (liquid).
+// Units: Tt [R], Cp [BTU/(lbm·R)], rho [lbm/ft3], h [BTU/lbm], k [BTU/(ft·s·R)], mu [lbm/(ft·s)]
+// Fit residuals: cp 0.03%, rho 0.01%, k 0.13%, mu ~2.5% (polynomial vs Arrhenius).
+
+indeps   = {"Tt", "Pt"};
+hTindeps = {"Tt", "Pt"};
+ThIndeps = {"ht", "Pt"};
+
+real Cp( real T, real P ){
+
+	return Cpt( T );
+}
+
+real Cpt( real T ){
+	return 2.5534304118e+00
+	       + -7.5079244324e-03 * T
+	       + 1.1937710448e-05 * T * T
+	       + -6.2362338953e-09 * T * T * T;
+}
+
+real rho( real T, real P ){
+	return 1.4551214516e+01
+	       + 2.3455079825e-01 * T
+	       + -3.6144341724e-04 * T * T
+	       + 1.6765625221e-07 * T * T * T;
+}
+
+real h_T( real T, real P ){
+	return 2.5534304118e+00 * T
+	       + -3.7539622162e-03 * T * T
+	       + 3.9792368159e-06 * T * T * T
+	       + -1.5590584738e-09 * T * T * T * T;
+}
+
+real T_h( real ht, real P ){
+	real T = 540.;
+	real iter = 0.;
+	do {
+		T = T - ( h_T( T, P ) - ht ) / Cpt( T );
+		iter = iter + 1.;
+	} while ( iter < 8. );
+	return T;
+}
+
+real k( real T, real P ){
+	return -1.1546409405e-04
+	       + 6.4604491957e-07 * T
+	       + -4.6435783453e-10 * T * T;
+}
+
+real mu( real T, real P ){
+	return 3.1225573711e-01
+	       + -2.0064223228e-03 * T
+	       + 4.8568995387e-06 * T * T
+	       + -5.2390050219e-09 * T * T * T
+	       + 2.1223451830e-12 * T * T * T * T;
+}
