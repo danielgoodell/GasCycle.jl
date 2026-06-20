@@ -17,8 +17,7 @@ include("core/Port.jl")
 include("core/Element.jl")
 
 # ── Performance maps ──────────────────────────────────────────────────────────
-include("maps/PerformanceMap.jl")
-include("maps/MapScaling.jl")
+include("maps/TurbomachineMap.jl")
 include("maps/NPSSMapReader.jl")
 
 # ── Elements ──────────────────────────────────────────────────────────────────
@@ -58,8 +57,10 @@ export viscosity, conductivity, prandtl
 export FluidState, Port, AbstractElement
 export update
 
-export PerformanceMap, scale_map, query, corrected_speed, corrected_flow
-export read_npss_map, to_performance_map, NPSSMapTable
+export TurbomachineMap, CompressorMap, TurbineMap, FunctionMap
+export eval_map, scale_map, corrected_speed, corrected_flow
+export ReynoldsModel, ReDesIndex, RawRe, FunctionReynolds, re_coord, reynolds_index
+export read_npss_map, compressor_map, turbine_map
 
 export Compressor, Turbine, Duct, Shaft, HeatSource, HeatExchanger, Radiator, Splitter, Mixer
 export compute!, compute_hx!, size_UA!, specific_work, pressure_ratio, Q_transferred, Q_rejected, power_balance

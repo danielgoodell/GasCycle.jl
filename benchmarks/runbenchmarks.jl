@@ -80,17 +80,18 @@ function backend_recuperated_design_net(fluid)
     net
 end
 
-function synthetic_base_maps()
-    Nc_ax = collect(0.5:0.05:1.3)
-    Wc_ax = collect(0.4:0.05:1.4)
-    cbase = PerformanceMap(Nc_ax, Wc_ax,
-        [1.0 + 1.5 * n^2 * (1.3 - 0.5 * w) for n in Nc_ax, w in Wc_ax],
-        [0.83 - 0.3 * (w - n)^2 for n in Nc_ax, w in Wc_ax])
-    tbase = PerformanceMap(Nc_ax, Wc_ax,
-        [1.0 + 2.0 * w * sqrt(n) for n in Nc_ax, w in Wc_ax],
-        [0.88 - 0.2 * (w - n)^2 for n in Nc_ax, w in Wc_ax])
-    (cbase, tbase)
-end
+# Native-coordinate synthetic maps (FunctionMap "scripts") passing through design.
+synthetic_comp_map(; Nc_des, Wc_des, PR_des, eta_des, R_des=2.0) =
+    FunctionMap((Nc, R, rc) -> (;
+        Wc  = Wc_des * (Nc / Nc_des) * (1 + 0.30 * (R - R_des)),
+        PR  = 1 + (PR_des - 1) * (Nc / Nc_des)^2 * (1 - 0.10 * (R - R_des)),
+        eff = eta_des - 0.05 * (R - R_des)^2 - 0.10 * (Nc / Nc_des - 1)^2);
+        line_des = R_des)
+
+synthetic_turb_map(; Np_des, Wp_des, PR_des, eta_des) =
+    FunctionMap((Np, PR, rc) -> (;
+        Wp  = Wp_des * (1 + 0.8 * (PR - PR_des) / (PR_des - 1)) * (1 + 0.05 * (Np / Np_des - 1)),
+        eff = eta_des - 0.10 * (Np / Np_des - 1)^2))
 
 function offdesign_map_net()
     fluid = IdealGasFluid(M_molar=83.8)
@@ -122,15 +123,12 @@ function offdesign_map_net()
     Nc_c, Wc_c = corrected_speed(N_des, T1), corrected_flow(W, T1, P1)
     Nc_t, Wc_t = corrected_speed(N_des, Tt3), corrected_flow(W, Tt3, Pt3)
 
-    cbase, tbase = synthetic_base_maps()
-    cmap = scale_map(cbase; Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_c,
-                     eta_des=η_c, Nc_ref=0.93, Wc_ref=0.87)
-    tmap = scale_map(tbase; Nc_des=Nc_t, Wc_des=Wc_t, PR_des=PR_t,
-                     eta_des=η_t, Nc_ref=0.93, Wc_ref=0.87)
+    cmap = synthetic_comp_map(Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_c, eta_des=η_c)
+    tmap = synthetic_turb_map(Np_des=Nc_t, Wp_des=Wc_t, PR_des=PR_t, eta_des=η_t)
 
     comp = Compressor("Comp"; η_poly=η_c, map=cmap, mode=:off_design)
     heat = HeatSource("Reactor"; TtExit=TIT, dPqP=0.02)
-    turb = Turbine("Turb"; η_poly=η_t, map=tmap, mode=:off_design)
+    turb = Turbine("Turb"; PR=PR_t, η_poly=η_t, map=tmap, mode=:off_design)
     shaft = Shaft("Main"; N=0.95 * N_des, mode=:off_design)
 
     net = FlowNetwork()

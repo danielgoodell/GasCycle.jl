@@ -14,8 +14,8 @@ Modeling assumptions:
   - Compressor inlet held at fixed Pt/Tt (perfect heat sink + inventory
     control).  Loop pressure closure is therefore not re-enforced off-design;
     the turbine exhaust pressure follows from its map PR.
-  - Synthetic map shapes (smooth analytic surfaces) scaled through the BRU
-    design point — real BRU maps can be dropped in via PerformanceMap.
+  - The real BRU argon-rig maps (data/compressor_argon.map, turbine_argon_tt.map)
+    loaded and scaled through the BRU design point.
 """
 
 using Pkg; Pkg.activate(joinpath(@__DIR__, ".."))
@@ -82,25 +82,17 @@ Nc_t, Wc_t = corrected_speed(N_des, s_t.Tt),    corrected_flow(W_flow, s_t.Tt, s
 println("\nDesign point: W_shaft = $(round(P_net_des/1000, digits=2)) kW, " *
         "PR_turb = $(round(PR_t_des, digits=4))")
 
-# ── Stage 2: scale synthetic maps through the design point ────────────────────
-Nc_ax = collect(0.5:0.05:1.3)
-Wc_ax = collect(0.4:0.05:1.4)
-cbase = PerformanceMap(Nc_ax, Wc_ax,
-    [1.0 + 1.5 * n^2 * (1.3 - 0.5 * w) for n in Nc_ax, w in Wc_ax],
-    [0.83 - 0.3 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
-tbase = PerformanceMap(Nc_ax, Wc_ax,
-    [1.0 + 2.0 * w * sqrt(n)           for n in Nc_ax, w in Wc_ax],
-    [0.88 - 0.2 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
+# ── Stage 2: load the real BRU maps and scale through the design point ────────
+cbase = compressor_map(joinpath(@__DIR__, "..", "data", "compressor_argon.map"))
+tbase = turbine_map(joinpath(@__DIR__, "..", "data", "turbine_argon_tt.map"))
 
-cmap = scale_map(cbase; Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_comp, eta_des=η_comp,
-                 Nc_ref=0.93, Wc_ref=0.87)
-tmap = scale_map(tbase; Nc_des=Nc_t, Wc_des=Wc_t, PR_des=PR_t_des, eta_des=η_turb,
-                 Nc_ref=0.93, Wc_ref=0.87)
+cmap = scale_map(cbase; Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_comp, eta_des=η_comp)
+tmap = scale_map(tbase; Np_des=Nc_t, Wp_des=Wc_t, PR_des=PR_t_des, eta_des=η_turb)
 
 # ── Stage 3: off-design TIT sweep at constant shaft speed ─────────────────────
 net, comp, recup, heater, turb, shaft =
     build_loop(comp_kw=(map=cmap, mode=:off_design),
-               turb_kw=(map=tmap, mode=:off_design),
+               turb_kw=(PR=PR_t_des, map=tmap, mode=:off_design),
                shaft_kw=(N=N_des,))   # alternator-locked: N fixed, no shaft residual
 
 TIT_range_R = range(0.6 * TIT_des_R, TIT_des_R, length=21)
@@ -127,7 +119,8 @@ for TIT_R in reverse(collect(TIT_range_R))   # sweep down from design
             "$(round(W_shaft,digits=3)), $(round(W_elec,digits=3)), " *
             "$(round(Q_heat,digits=3)), $(round(Q_rec,digits=3)), " *
             "$(round(η_cyc,digits=2)), $(round(pressure_ratio(comp),digits=4)), " *
-            "$(round(pressure_ratio(turb),digits=4)), $(round(turb.Wc_map,digits=4))")
+            "$(round(pressure_ratio(turb),digits=4)), " *
+            "$(round(corrected_flow(turb.inlet[].W, turb.inlet[].Tt, turb.inlet[].Pt),digits=4))")
     push!(results, (TIT_R, W_shaft, W_elec))
 end
 

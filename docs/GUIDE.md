@@ -92,21 +92,24 @@ turbomachine performance comes from maps, shaft speed from the power balance,
 and heat-exchanger effectiveness from flow-scaled UA. The recipe:
 
 ```julia
-# 1. Solve the design point (as above), then scale maps through it:
+# 1. Solve the design point (as above), then scale maps through it.  cbase/tbase
+#    are native maps — a CompressorMap/TurbineMap from compressor_map()/
+#    turbine_map(), or a FunctionMap "script".
 s1, s3 = comp.inlet[], turb.inlet[]
 cmap = scale_map(cbase; Nc_des=corrected_speed(N_des, s1.Tt),
                  Wc_des=corrected_flow(s1.W, s1.Tt, s1.Pt),
                  PR_des=pressure_ratio(comp), eta_des=0.88)
-tmap = scale_map(tbase; Nc_des=corrected_speed(N_des, s3.Tt),
-                 Wc_des=corrected_flow(s3.W, s3.Tt, s3.Pt),
+tmap = scale_map(tbase; Np_des=corrected_speed(N_des, s3.Tt),
+                 Wp_des=corrected_flow(s3.W, s3.Tt, s3.Pt),
                  PR_des=pressure_ratio(turb), eta_des=0.90)
 
 # 2. Size the recuperator UA at the design point (ε now responds to flows):
 size_UA!(recup)
 
-# 3. Rebuild (or switch) the turbomachines and shaft into off-design mode:
+# 3. Rebuild (or switch) the turbomachines and shaft into off-design mode.
+#    Seed the turbine PR at its design expansion ratio:
 comp  = Compressor("Comp"; map=cmap, mode=:off_design, η_poly=0.88)
-turb  = Turbine("Turb";  map=tmap, mode=:off_design, η_poly=0.90)
+turb  = Turbine("Turb";  PR=pressure_ratio(turb), map=tmap, mode=:off_design, η_poly=0.90)
 shaft = Shaft("Shaft"; N=0.97*N_des, mode=:off_design, P_load=P_design)
 
 # 4. Wire the same network shape and solve; then perturb and re-solve:
@@ -115,12 +118,17 @@ rx.TtExit = 0.9 * 1100.0     # throttle the reactor
 sol = solve!(net)
 ```
 
-How it works: each off-design turbomachine owns one unknown (its map flow
-coordinate `Wc_map`) with a flow-continuity residual; an off-design shaft owns
-its speed `N` with the power-balance residual (`P_load` is the generator
-extraction). These join the back-edge states in one Newton vector, solved with
-a trust-region method. A fixed-speed (alternator-locked) study just leaves the
-shaft in `:design` mode and sweeps a boundary condition — see
+How it works: maps are evaluated **forward in their native coordinates** (no
+inversion). An off-design compressor owns its R-line coordinate `Rline`; an
+off-design turbine owns its expansion ratio `PR` (the map's native input) — each
+with a flow-continuity residual (the corrected flow the map passes must equal the
+actual flow). An off-design shaft owns its speed `N` with the power-balance
+residual (`P_load` is the generator extraction). These join the back-edge states
+(which carry loop pressure closure) in one Newton vector, solved with a
+trust-region method. An optional `reynolds=ReDesIndex(Re_des)` (or any
+`ReynoldsModel`) drives the map's Reynolds-correction tables; the default applies
+no correction. A fixed-speed (alternator-locked) study just leaves the shaft in
+`:design` mode and sweeps a boundary condition — see
 `examples/bru_tit_sweep_offdesign.jl`.
 
 `solve!` picks the mode automatically: if any element declares independent
@@ -152,6 +160,14 @@ dW_dM = ForwardDiff.derivative(M -> power_with_fluid(HeXe(M)), 83.8)
 ```
 
 See `examples/forwarddiff_sensitivity.jl`.
+
+Because those gradients are exact, they plug straight into a gradient-based
+optimizer. `examples/optimize_cycle.jl` maximizes net shaft power over
+`[PR_comp, TIT]` (subject to a turbine material limit) by feeding the
+ForwardDiff gradient — and the ForwardDiff *Hessian*, which also propagates
+through the nested solve — to Optim.jl, then validates the optimum against a
+brute-force grid sweep. Optim is not a GasCycle dependency; `] add Optim` into
+your environment to run it.
 
 ## Plots
 

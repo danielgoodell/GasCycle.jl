@@ -2,55 +2,38 @@ using Test
 using GasCycle
 import GasCycle: cp
 
-"""
-Off-design map-based operation (NPSS-style formulation).
+isdefined(@__MODULE__, :synthetic_comp_map) ||
+    include(joinpath(@__DIR__, "synthetic_maps.jl"))
 
-Unknowns per off-design turbomachine: the map flow coordinate Wc_map.
-Unknown per off-design shaft: speed N.
-Residuals: Wc_map - Wc_actual per machine, shaft power balance.
+"""
+Off-design map-based operation (NPSS-style native formulation).
+
+Unknown per off-design compressor: the R-line coordinate.
+Unknown per off-design turbine:    the expansion ratio PR (map's native input).
+Unknown per off-design shaft:       speed N.
+Residuals: map corrected flow − actual corrected flow per machine, shaft power
+balance.  Loop pressure closure is the network back-edge.
 
 Gold-standard check: an off-design solve at design boundary conditions, with
-maps scaled through the design point, must recover the design shaft speed,
+maps that pass through the design point, must recover the design shaft speed,
 pressure ratios, and efficiencies.
 """
 
-# Synthetic base maps shared by the off-design testsets: smooth analytic
-# surfaces with physically-signed slopes (compressor PR falls with flow,
-# turbine PR rises with flow; both rise with speed).
-function synthetic_base_maps()
-    Nc_ax = collect(0.5:0.05:1.3)
-    Wc_ax = collect(0.4:0.05:1.4)
-    cbase = PerformanceMap(Nc_ax, Wc_ax,
-        [1.0 + 1.5 * n^2 * (1.3 - 0.5 * w) for n in Nc_ax, w in Wc_ax],
-        [0.83 - 0.3 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
-    tbase = PerformanceMap(Nc_ax, Wc_ax,
-        [1.0 + 2.0 * w * sqrt(n)           for n in Nc_ax, w in Wc_ax],
-        [0.88 - 0.2 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
-    (cbase, tbase)
-end
+@testset "TurbomachineMap interface basics" begin
+    # FunctionMap "script" backend evaluates forward and feeds the elements.
+    cm = synthetic_comp_map(Nc_des = 1.0, Wc_des = 1.0, PR_des = 2.0, eta_des = 0.85)
+    o  = eval_map(cm, 1.0, 2.0)
+    @test (o.Wc, o.PR, o.eff) == (1.0, 2.0, 0.85)
+    @test eval_map(cm, 1.0, 2.5).Wc > o.Wc      # flow rises with R-line
+    @test eval_map(cm, 1.0, 2.5).PR < o.PR      # PR falls with R-line
 
-@testset "PerformanceMap bounds policy" begin
-    Nc_ax = [1.0, 2.0]
-    Wc_ax = [10.0, 20.0]
-    PR = [2.0 2.5; 3.0 3.5]
-    η = [0.80 0.81; 0.82 0.83]
+    tm = synthetic_turb_map(Np_des = 1.0, Wp_des = 0.5, PR_des = 1.6, eta_des = 0.9)
+    t0 = eval_map(tm, 1.0, 1.6)
+    @test (t0.Wp, t0.eff) == (0.5, 0.9)
+    @test eval_map(tm, 1.0, 1.8).Wp > t0.Wp     # Wp monotonic in PR
 
-    strict = PerformanceMap(Nc_ax, Wc_ax, PR, η)
-    @test query(strict, 1.5, 15.0) == (2.75, 0.815)
-    @test_throws DomainError query(strict, 0.9, 15.0)
-    @test_throws DomainError query(strict, 1.5, 21.0)
-    @test_throws ErrorException PerformanceMap(Nc_ax, Wc_ax, PR, η; bounds=:bad)
-
-    clamping = PerformanceMap(Nc_ax, Wc_ax, PR, η; bounds=:clamp)
-    @test query(clamping, 0.9, 15.0) == query(clamping, 1.0, 15.0)
-
-    warning = PerformanceMap(Nc_ax, Wc_ax, PR, η; bounds=:warn)
-    @test_warn "outside map bounds" query(warning, 2.1, 15.0)
-
-    scaled = scale_map(clamping; Nc_des=3.0, Wc_des=30.0, PR_des=4.0, eta_des=0.9,
-                       Nc_ref=1.5, Wc_ref=15.0)
-    @test scaled.bounds == :clamp
-    @test query(scaled, 1.0, 30.0) == query(scaled, scaled.Nc_axis[1], 30.0)
+    # Reynolds index is a no-op until a model is attached (rc === nothing).
+    @test eval_map(cm, 1.0, 2.0, nothing).eff == 0.85
 end
 
 @testset "Off-design map operation" begin
@@ -88,19 +71,13 @@ end
     Nc_c, Wc_c = corrected_speed(N_des, T1),  corrected_flow(W, T1, P1)
     Nc_t, Wc_t = corrected_speed(N_des, Tt3), corrected_flow(W, Tt3, Pt3)
 
-    cbase, tbase = synthetic_base_maps()
-
-    # Reference point chosen off-node so the design point lands inside smooth
-    # interpolation cells rather than on a grid kink.
-    cmap = scale_map(cbase; Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_c, eta_des=η_c,
-                     Nc_ref=0.93, Wc_ref=0.87)
-    tmap = scale_map(tbase; Nc_des=Nc_t, Wc_des=Wc_t, PR_des=PR_t, eta_des=η_t,
-                     Nc_ref=0.93, Wc_ref=0.87)
+    cmap = synthetic_comp_map(Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_c, eta_des=η_c)
+    tmap = synthetic_turb_map(Np_des=Nc_t, Wp_des=Wc_t, PR_des=PR_t, eta_des=η_t)
 
     function build_offdesign_net(; TtExit, N0)
         comp  = Compressor("Comp"; η_poly=η_c, map=cmap, mode=:off_design)
         heat  = HeatSource("Reactor"; TtExit=TtExit, dPqP=0.02)
-        turb  = Turbine("Turb"; η_poly=η_t, map=tmap, mode=:off_design)
+        turb  = Turbine("Turb"; PR=PR_t, η_poly=η_t, map=tmap, mode=:off_design)
         shaft = Shaft("Main"; N=N0, mode=:off_design)
 
         net = FlowNetwork()
@@ -119,17 +96,17 @@ end
         @test shaft.N      ≈ N_des rtol=1e-3
         @test comp.PR      ≈ PR_c  rtol=1e-3
         @test comp.η_poly  ≈ η_c   rtol=1e-3
-        @test comp.Wc_map  ≈ Wc_c  rtol=1e-3
-        @test turb.Wc_map  ≈ Wc_t  rtol=1e-3
+        @test corrected_flow(comp.inlet[].W, comp.inlet[].Tt, comp.inlet[].Pt) ≈ Wc_c rtol=1e-3
+        @test corrected_flow(turb.inlet[].W, turb.inlet[].Tt, turb.inlet[].Pt) ≈ Wc_t rtol=1e-3
         @test turb.inlet[].Pt / turb.outlet[].Pt ≈ PR_t rtol=1e-3
         @test abs(power_balance(shaft)) < 1e-3 * w_comp * W
 
-        # Regression for the Wc_map = Wc_act bug: the flow-match residual must
-        # be a real constraint, not structurally zero.
-        Wc_saved = comp.Wc_map
-        comp.Wc_map = 1.05 * Wc_saved
+        # The flow-match residual must be a real constraint: perturbing the
+        # R-line off its converged value breaks flow continuity.
+        R_saved = comp.Rline
+        comp.Rline = R_saved + 0.2
         @test abs(residuals(comp)[1]) > 1e-3
-        comp.Wc_map = Wc_saved
+        comp.Rline = R_saved
     end
 
     @testset "reduced turbine inlet temperature" begin
@@ -196,16 +173,13 @@ end
     Nc_c, Wc_c = corrected_speed(N_des, T1),     corrected_flow(W, T1, P1)
     Nc_t, Wc_t = corrected_speed(N_des, s_t.Tt), corrected_flow(W, s_t.Tt, s_t.Pt)
 
-    cbase, tbase = synthetic_base_maps()
-    cmap = scale_map(cbase; Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_c, eta_des=η_c,
-                     Nc_ref=0.93, Wc_ref=0.87)
-    tmap = scale_map(tbase; Nc_des=Nc_t, Wc_des=Wc_t, PR_des=PR_t_des, eta_des=η_t,
-                     Nc_ref=0.93, Wc_ref=0.87)
+    cmap = synthetic_comp_map(Nc_des=Nc_c, Wc_des=Wc_c, PR_des=PR_c, eta_des=η_c)
+    tmap = synthetic_turb_map(Np_des=Nc_t, Wp_des=Wc_t, PR_des=PR_t_des, eta_des=η_t)
 
     @testset "design-point reproduction with generator load" begin
         net, comp, recup, heat, turb, shaft =
             build_loop(comp_kw=(map=cmap, mode=:off_design),
-                       turb_kw=(map=tmap, mode=:off_design),
+                       turb_kw=(PR=PR_t_des, map=tmap, mode=:off_design),
                        shaft_kw=(N=0.97 * N_des, mode=:off_design, P_load=P_net_des))
         sol = solve!(net)
 
@@ -213,8 +187,8 @@ end
         @test shaft.N ≈ N_des rtol=1e-3
         @test pressure_ratio(comp) ≈ PR_c     rtol=1e-3
         @test pressure_ratio(turb) ≈ PR_t_des rtol=1e-3
-        @test comp.Wc_map ≈ Wc_c rtol=1e-3
-        @test turb.Wc_map ≈ Wc_t rtol=1e-3
+        @test corrected_flow(comp.inlet[].W, comp.inlet[].Tt, comp.inlet[].Pt) ≈ Wc_c rtol=1e-3
+        @test corrected_flow(turb.inlet[].W, turb.inlet[].Tt, turb.inlet[].Pt) ≈ Wc_t rtol=1e-3
         @test power_balance(shaft) ≈ P_net_des rtol=1e-3
     end
 
@@ -223,7 +197,7 @@ end
         # the map operating points and the loop back-edge are the unknowns.
         net, comp, recup, heat, turb, shaft =
             build_loop(comp_kw=(map=cmap, mode=:off_design),
-                       turb_kw=(map=tmap, mode=:off_design),
+                       turb_kw=(PR=PR_t_des, map=tmap, mode=:off_design),
                        shaft_kw=(N=N_des,))
 
         fracs  = collect(1.0:-0.05:0.6)
@@ -343,17 +317,16 @@ end
 
     # Maps through the design point, then off-design with the sized recup
     s_t = turb_d.inlet[]
-    cbase, tbase = synthetic_base_maps()
-    cmap = scale_map(cbase; Nc_des = corrected_speed(N_des, T1),
+    cmap = synthetic_comp_map(Nc_des = corrected_speed(N_des, T1),
                      Wc_des = corrected_flow(W, T1, P1),
-                     PR_des = PR_c, eta_des = η_c, Nc_ref = 0.93, Wc_ref = 0.87)
-    tmap = scale_map(tbase; Nc_des = corrected_speed(N_des, s_t.Tt),
-                     Wc_des = corrected_flow(W, s_t.Tt, s_t.Pt),
-                     PR_des = PR_t_d, eta_des = η_t, Nc_ref = 0.93, Wc_ref = 0.87)
+                     PR_des = PR_c, eta_des = η_c)
+    tmap = synthetic_turb_map(Np_des = corrected_speed(N_des, s_t.Tt),
+                     Wp_des = corrected_flow(W, s_t.Tt, s_t.Pt),
+                     PR_des = PR_t_d, eta_des = η_t)
 
     net_od, comp_od, heat_od, turb_od, shaft_od =
         build_recup_loop(recup; comp_kw = (map = cmap, mode = :off_design),
-                         turb_kw = (map = tmap, mode = :off_design),
+                         turb_kw = (PR = PR_t_d, map = tmap, mode = :off_design),
                          shaft_kw = (N = N_des,))   # alternator-locked speed
 
     # Off-design solve at design conditions reproduces the design point,

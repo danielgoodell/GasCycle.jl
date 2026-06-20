@@ -42,26 +42,24 @@ const RB = GasCycle.RecipesBase
                                            GasCycle.TsDiagram((42,)))
 
     # ── Performance map plot ─────────────────────────────────────────────────
-    Nc_ax = collect(0.5:0.1:1.3)
-    Wc_ax = collect(0.4:0.1:1.4)
-    PR_g  = [1 + 1.5n^2 * (1.3 - 0.5w) for n in Nc_ax, w in Wc_ax]
-    eta_g = [0.85 - 0.1 * (n - 1)^2 - 0.1 * (w - 1)^2 for n in Nc_ax, w in Wc_ax]
-    pmap  = PerformanceMap(Nc_ax, Wc_ax, PR_g, eta_g)
+    # Real R-line compressor map, scaled to a design point.
+    cm0  = compressor_map(joinpath(@__DIR__, "..", "data", "compressor_argon.map"))
+    pmap = scale_map(cm0; Nc_des = 36000.0, Wc_des = 0.581, PR_des = 1.9, eta_des = 0.795)
+    nlines = length(pmap.flow.speeds[1])              # one speed line per NcMap node
 
     series = RB.apply_recipe(Dict{Symbol,Any}(), GasCycle.MapPlot((pmap,)))
-    @test length(series) == length(Nc_ax)            # one speed line per Nc
-    @test series[1].args == (Wc_ax, PR_g[1, :])
+    @test length(series) == nlines
+    @test length(series[1].args[1]) == length(series[1].args[2])  # (Wc, PR) pair
 
     # Turbomachine with map and solved state adds an operating point
     comp_od = Compressor("CompOD"; map = pmap, mode = :off_design)
-    comp_od.N_shaft = 1.0
-    comp_od.Wc_map  = 0.9
-    compute!(comp_od, Port(FluidState(101325.0, 288.15, 0.9, fluid)))
+    comp_od.N_shaft = 36000.0
+    compute!(comp_od, Port(FluidState(101325.0, 288.15, 0.5, fluid)))
     series = RB.apply_recipe(Dict{Symbol,Any}(), GasCycle.MapPlot((comp_od,)))
-    @test length(series) == length(Nc_ax) + 1
+    @test length(series) == nlines + 1
     op = series[end]
     @test op.plotattributes[:seriestype] == :scatter
-    @test op.args[1] == [0.9]
+    @test length(op.args[1]) == 1                     # single operating point
 
     @test_throws Exception RB.apply_recipe(Dict{Symbol,Any}(),
                                            GasCycle.MapPlot((Duct("D"),)))

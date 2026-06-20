@@ -131,9 +131,8 @@ src/
 │   ├── Mixer.jl             # mass and energy mixing of N inlet streams
 │   └── Shaft.jl             # power balance; off-design speed + P_load extraction
 ├── maps/
-│   ├── PerformanceMap.jl    # corrected speed/flow map with interpolation
-│   ├── MapScaling.jl        # design-point scaling
-│   └── NPSSMapReader.jl     # NPSS .map (NEO Table) → PerformanceMap
+│   ├── TurbomachineMap.jl   # native-coordinate map interface (R-line/PR); table + script backends; scaling; Reynolds
+│   └── NPSSMapReader.jl     # NPSS .map (NEO Subelement/Table) → CompressorMap/TurbineMap
 ├── network/
 │   └── FlowNetwork.jl       # directed port graph; flow plan; back-edges; boundaries
 ├── solver/

@@ -161,8 +161,9 @@ function _describe(el::Union{Compressor,Turbine})
     str   = @sprintf("PR=%.4f  %s=%.4f  P=%.2f kW",
                      _scalar(pressure_ratio(el)), η_lbl, _scalar(el.η_poly), P_kW)
     if el.mode == :off_design
-        s = el.inlet[]
-        str *= @sprintf("  Wc=%.4f  Nc=%.1f", el.Wc_map,
+        s  = el.inlet[]
+        Wc = corrected_flow(_scalar(s.W), _scalar(s.Tt), _scalar(s.Pt))
+        str *= @sprintf("  Wc=%.4f  Nc=%.1f", Wc,
                         corrected_speed(el.N_shaft, _scalar(s.Tt)))
     end
     str

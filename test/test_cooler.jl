@@ -2,6 +2,9 @@ using Test
 using GasCycle
 import GasCycle: cp
 
+isdefined(@__MODULE__, :synthetic_comp_map) ||
+    include(joinpath(@__DIR__, "synthetic_maps.jl"))
+
 """
 Cold-end physics (roadmap item 6): ConstantPropertyLiquid coolants,
 UA-mode (ε-NTU) heat exchanger, Radiator element, and loop closure through
@@ -205,26 +208,18 @@ end
         T1, P1d = s1.Tt, s1.Pt
         P_des = net_power(sol)
 
-        Nc_ax = collect(0.5:0.05:1.3)
-        Wc_ax = collect(0.4:0.05:1.4)
-        cbase = PerformanceMap(Nc_ax, Wc_ax,
-            [1.0 + 1.5 * n^2 * (1.3 - 0.5 * w) for n in Nc_ax, w in Wc_ax],
-            [0.83 - 0.3 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
-        tbase = PerformanceMap(Nc_ax, Wc_ax,
-            [1.0 + 2.0 * w * sqrt(n)           for n in Nc_ax, w in Wc_ax],
-            [0.88 - 0.2 * (w - n)^2            for n in Nc_ax, w in Wc_ax])
-        cmap = scale_map(cbase; Nc_des = corrected_speed(N_des, T1),
+        cmap = synthetic_comp_map(Nc_des = corrected_speed(N_des, T1),
                          Wc_des = corrected_flow(W, T1, P1d),
-                         PR_des = PR_c, eta_des = η_c, Nc_ref = 0.93, Wc_ref = 0.87)
-        tmap = scale_map(tbase; Nc_des = corrected_speed(N_des, s_t.Tt),
-                         Wc_des = corrected_flow(W, s_t.Tt, s_t.Pt),
-                         PR_des = PR_t, eta_des = η_t, Nc_ref = 0.93, Wc_ref = 0.87)
+                         PR_des = PR_c, eta_des = η_c)
+        tmap = synthetic_turb_map(Np_des = corrected_speed(N_des, s_t.Tt),
+                         Wp_des = corrected_flow(W, s_t.Tt, s_t.Pt),
+                         PR_des = PR_t, eta_des = η_t)
 
         cool_od = HeatExchanger("Cooler"; UA = 400.0,
                                 dPqP_hot = dPqP_cool, dPqP_cold = 0.005)
         net_od, comp_od, recup_od, heat_od, turb_od, shaft_od =
             build_loop(cool_od; comp_kw = (map = cmap, mode = :off_design),
-                       turb_kw = (map = tmap, mode = :off_design),
+                       turb_kw = (PR = PR_t, map = tmap, mode = :off_design),
                        shaft_kw = (N = N_des,))   # alternator-locked speed
 
         # Design-point reproduction with the cold end in the loop

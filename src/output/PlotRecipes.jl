@@ -66,33 +66,34 @@ end
 
 @recipe function f(h::MapPlot)
     el = nothing
-    m  = if h.args[1] isa PerformanceMap
+    m  = if h.args[1] isa TurbomachineMap
         h.args[1]
     elseif h.args[1] isa Union{Compressor,Turbine} && !isnothing(h.args[1].map)
         el = h.args[1]
         el.map
     else
-        error("mapplot expects a PerformanceMap, or a Compressor/Turbine with a map attached")
+        error("mapplot expects a TurbomachineMap, or a Compressor/Turbine with a map attached")
     end
+    m isa FunctionMap &&
+        error("mapplot cannot draw a FunctionMap (no tabulated speed lines)")
 
-    xguide --> "Wc  [kg/s, corrected]"
+    xguide --> "corrected flow  [kg/s]"
     yguide --> "PR"
     title  --> (isnothing(el) ? "Performance map" : "$(el.name) map")
     legend --> :topleft
 
-    for (i, Nc) in enumerate(m.Nc_axis)
+    for (spd, x, PR) in speed_lines(m)
         @series begin
             seriestype := :path
-            label      := "Nc = $(round(Nc, sigdigits=4))"
-            m.Wc_axis, m.PR_grid[i, :]
+            label      := "Nc = $(round(spd, sigdigits=4))"
+            x, PR
         end
     end
 
     # Operating point from the last solve
     if !isnothing(el) && !isnothing(el.inlet)
         s  = el.inlet[]
-        Wc = el.mode == :off_design && el.Wc_map > 0 ? el.Wc_map :
-             corrected_flow(_scalar(s.W), _scalar(s.Tt), _scalar(s.Pt))
+        Wc = corrected_flow(_scalar(s.W), _scalar(s.Tt), _scalar(s.Pt))
         @series begin
             seriestype  := :scatter
             marker      := :star5

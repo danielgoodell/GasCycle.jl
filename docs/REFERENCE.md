@@ -66,22 +66,30 @@ may set fields (`heat.TtExit = ...`, `rad.mode = :fixed_area`) between solves.
 
 ### Compressor
 ```julia
-Compressor(name; PR=2.0, η_poly=0.87, η_type=:polytropic, map=nothing, mode=:design)
+Compressor(name; PR=2.0, η_poly=0.87, η_type=:polytropic,
+           map=nothing, reynolds=nothing, mode=:design)
 ```
 - `mode=:design` — `PR` fixed by the user.
-- `mode=:off_design` — PR and η interpolated from `map` at `(Nc, Wc_map)`;
-  `Wc_map` is a solver unknown with a flow-continuity residual.
+- `mode=:off_design` — PR and η from `map` evaluated forward at `(Nc, Rline)`;
+  the R-line coordinate `Rline` is the solver unknown, closed by a
+  flow-continuity residual (map corrected flow = actual). `map` is a
+  `TurbomachineMap` (e.g. `CompressorMap` or `FunctionMap`).
+- `reynolds` — optional `ReynoldsModel` feeding the map's Reynolds tables
+  (default `nothing` ⇒ no correction).
 - `η_type` — `:polytropic` (small-stage) or `:isentropic` (NPSS `effDes`).
 
 ### Turbine
 ```julia
 Turbine(name; PR=2.0, η_poly=0.90, η_type=:polytropic, map=nothing,
-        mode=:design, P_exit=101325.0)
+        reynolds=nothing, mode=:design, P_exit=101325.0)
 ```
 - `mode=:design` — `PR` fixed.
 - `mode=:pressure_closure` — PR computed so the exhaust hits `P_exit`
   (standard for closed-cycle design solves).
-- `mode=:off_design` — as Compressor.
+- `mode=:off_design` — PR (the map's native input) is the solver unknown;
+  the map yields flow `Wp` and η at `(Np, PR)`, closed by a flow-continuity
+  residual. Loop pressure closure is the network back-edge. Seed `PR` at the
+  design expansion ratio. `reynolds` as Compressor.
 
 ### Duct
 ```julia
@@ -189,9 +197,10 @@ sol = solve!(net; tol=1e-6, maxiter=100, verbose=false)   # -> SolveResult
 
 Mode is automatic: with no element unknowns, a back-edge Newton
 (NonlinearSolve `NewtonRaphson`, ForwardDiff Jacobian) on the back-edge
-`[Tt, Pt]` states; with unknowns (off-design `Wc_map`s, shaft `N`), everything
-joins one normalized vector solved by `TrustRegion`. `tol` is on normalized
-residuals. Non-convergence warns and returns `status = :failed`.
+`[Tt, Pt]` states; with unknowns (off-design map line coordinates — compressor
+`Rline`, turbine `PR` — and shaft `N`), everything joins one normalized vector
+solved by `TrustRegion`. `tol` is on normalized residuals. Non-convergence warns
+and returns `status = :failed`.
 
 `SolveResult` fields: `status` (`:success`/`:failed`), `iterations`,
 `residual_norm`, `net`. `sol["Comp"]` looks an element up by name.
@@ -203,30 +212,39 @@ cycle_efficiency(sol)   # net power / Σ heat input
 
 ## Performance maps
 
+Maps are evaluated **forward in their native coordinates** (no inversion) through
+a single interface, so the element never touches table data — a map can be a
+tabulation from any file format or a plain function ("map as a script").
+
 ```julia
-m = PerformanceMap(Nc_axis, Wc_axis, PR_grid, eta_grid; bounds=:error)
-query(m, Nc, Wc)               # -> (PR, η), bilinear
+eval_map(m, Nc, Rline[, rc])    # CompressorMap -> (; Wc, PR, eff)
+eval_map(m, Np, PR[, rc])       # TurbineMap    -> (; Wp, eff)
 corrected_speed(N, Tt)          # N / √(Tt/288.15)
 corrected_flow(W, Tt, Pt)       # W·√(Tt/288.15) / (Pt/101325)
-scale_map(base; Nc_des, Wc_des, PR_des, eta_des,
-          Nc_ref=center, Wc_ref=center, bounds=base.bounds)
+scale_map(base::CompressorMap; Nc_des, Wc_des, PR_des, eta_des)
+scale_map(base::TurbineMap;    Np_des, Wp_des, PR_des, eta_des)
 ```
 
-`bounds` ∈ `:error` (DomainError outside the map), `:clamp`, `:warn`.
-`scale_map` makes the base map pass through the design point: axes scale by
-`des/ref`, PR scales as `1 + (PR−1)·s`, η multiplicatively. Pick `Nc_ref`/`Wc_ref`
-off the grid nodes so the design point lands inside a smooth cell.
+`scale_map` solves the four scale factors so the (unscaled) base map passes
+exactly through the design point at the map's own design anchors. `rc` is the
+value looked up in the map's Reynolds-correction tables (`rc === nothing` ⇒ no
+correction) — supplied on the element by a `ReynoldsModel`
+(`ReDesIndex(Re_des)`, `RawRe()`, or `FunctionReynolds(f)`).
 
-NPSS `.map` (NEO Table) files:
+`FunctionMap(f; line_des=2.0)` wraps a closure `f(speed, line, rc) -> NamedTuple`.
+
+NPSS `.map` (NEO `Subelement`/`Table`) files — the loader is fully positional
+(NPSS cares about hierarchy, not names):
 
 ```julia
-tables = read_npss_map("compressor.map")       # Dict{String, NPSSMapTable}
-m = to_performance_map(tables; alpha=NaN, flow="TB_Wc", pr="TB_PR",
-                       eff="TB_eff", nWc=25)   # Rline lines → rectangular map
+read_npss_map("file.map")                       # -> ParsedSubelement tree
+cm = compressor_map("compressor.map";           # -> unscaled CompressorMap
+                    flow="TB_Wc", pr="TB_PR", eff="TB_eff")
+tm = turbine_map("turbine.map"; flow="TB_Wp", eff="TB_eff")   # -> TurbineMap
 ```
 
-Run the result through `scale_map` at your design point (this also makes the
-lbm/s flow units in NPSS maps irrelevant).
+The builders read the file's design anchors and any nested Reynolds (`S_Re`)
+subelement; run the result through `scale_map` at your design point.
 
 ## Output
 

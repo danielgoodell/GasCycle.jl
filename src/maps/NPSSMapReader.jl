@@ -1,33 +1,31 @@
 """
-Reader for NPSS turbomachinery performance map files (NEO `Table` syntax).
+Reader for NPSS turbomachinery map files (NEO `Subelement`/`Table` syntax).
 
-A standard NPSS compressor map file contains three-level nested tables:
+Real NPSS map files wrap their tables in a subelement and may nest a Reynolds
+subelement, e.g.
 
-    Table TB_Wc(real ALPHA, real NcMap, real RlineMap) {
-        ALPHA = 0.0 {
-            NcMap = 0.60 {
-                RlineMap = { 1.0, 1.5, 2.0, 2.5, 3.0 }
-                Wc       = { 0.62, 0.58, 0.54, 0.49, 0.44 }
-            }
-            NcMap = 0.70 { ... }
+    Subelement CompressorRlineMap S_map {
+        RlineMapDes = 2.212;  NcMapDes = 1.000;        // scalar design anchors
+        Table TB_Wc(real alphaMap, real NcMap, real RlineMap) {
+            alphaMap = 0.0 { NcMap = 0.5 { RlineMap = {…}  WcMap = {…} } … }
+            NcMap.interp = "lagrange3";  RlineMap.extrap = "linear";  …
+        }
+        Table TB_PR(…) {…}   Table TB_eff(…) {…}
+        Subelement CompressorReynoldsEffects S_Re {
+            Table s_effRe(real RNI) { RNI = {…}  s_effRe = {…} }
+            Table s_WcRe (real RNI) { RNI = {…}  s_WcRe  = {…} }
         }
     }
-    Table TB_PR(...)  { ... }
-    Table TB_eff(...) { ... }
 
-`read_npss_map(path)` parses every table generically (any names, 2- or
-3-level nesting, value lists wrapped across lines, `//` and `#` comments).
+`read_npss_map(path)` parses this into a `ParsedSubelement` tree (subelements,
+tables, scalars).  NPSS only cares about *hierarchy*, not names — within a table
+the coordinate is the array named by the table's **last argument** and the value
+is the other array — so the parser is fully positional and works with any axis
+or leaf names (`ALPHA`/`SPED`/`R`/`FLOW`, `NcMap`/`WcMap`, …).
 
-`to_performance_map(tables)` converts the standard compressor-map form to the
-rectangular `(Nc, Wc)` `PerformanceMap` used by the solver, by inverting each
-speed line's Wc(Rline) onto a common corrected-flow grid.
-
-!!! warning
-    Near choke a speed line is nearly vertical (Wc constant while PR varies),
-    so PR(Wc) is ill-conditioned there and the rectangular resampling clamps
-    to the line ends.  An Rline-parameterized solver coordinate (the native
-    NPSS formulation) is the eventual fix; this converter covers maps whose
-    operating range stays off the vertical segment.
+`compressor_map(path)` / `turbine_map(path)` build the scaled-once-removed
+`CompressorMap`/`TurbineMap` the elements consume (call `scale_map` to place the
+design point).  Table roles default to the common names but are overridable.
 """
 
 # ── Tokenizer ─────────────────────────────────────────────────────────────────
@@ -47,10 +45,11 @@ function _map_tokens(content::AbstractString)
 end
 
 _is_number(t::AbstractString) = !isnothing(tryparse(Float64, t))
+_scalar_value(t::AbstractString) = _is_number(t) ? parse(Float64, t) : String(t)
 
-# ── Recursive-descent block parser ────────────────────────────────────────────
+# ── Parse tree ────────────────────────────────────────────────────────────────
 
-"""One `var = value { ... }` level: numeric children or leaf arrays."""
+"""One `var = value { … }` level inside a table: numeric children or leaf arrays."""
 struct _MapNode
     var::String
     val::Float64
@@ -58,223 +57,262 @@ struct _MapNode
     arrays::Vector{Pair{String,Vector{Float64}}}
 end
 
-# Parses the region between '{' and '}' starting at toks[i] == "{".
-# Returns (children, arrays, next_index).
-function _parse_block(toks::Vector{String}, i::Int)
-    toks[i] == "{" || error("NPSS map parse: expected '{' at token $i, got '$(toks[i])'")
+"""A parsed `Table` block (data left as the raw nested-node tree + settings)."""
+struct ParsedTable
+    name::String
+    argnames::Vector{String}
+    root_children::Vector{_MapNode}                    # speed/alpha nesting
+    root_arrays::Vector{Pair{String,Vector{Float64}}}  # 1-D tables: arrays directly
+    settings::Dict{String,Any}                         # axis.interp, extrap flags, …
+end
+
+"""A parsed `Subelement` block (or the synthetic file root)."""
+struct ParsedSubelement
+    stype::String
+    name::String
+    scalars::Dict{String,Any}
+    tables::Vector{ParsedTable}
+    subelements::Vector{ParsedSubelement}
+end
+
+# ── Recursive-descent parser ──────────────────────────────────────────────────
+
+# Parse a table body starting at toks[i] == "{"; returns (children, arrays, settings, next_i).
+function _parse_table_body(toks::Vector{String}, i::Int)
+    toks[i] == "{" || error("NPSS map: expected '{' at token $i, got '$(toks[i])'")
     i += 1
     children = _MapNode[]
     arrays   = Pair{String,Vector{Float64}}[]
+    settings = Dict{String,Any}()
 
     while toks[i] != "}"
         name = toks[i]
-        toks[i+1] == "=" || error("NPSS map parse: expected '=' after '$name'")
+        toks[i+1] == "=" || error("NPSS map: expected '=' after '$name'")
         i += 2
-        if toks[i] == "{"                       # leaf array: name = { v, v, … }
+        if toks[i] == "{"                                   # leaf array
             i += 1
             vals = Float64[]
             while toks[i] != "}"
-                t = toks[i]
-                t == "," || push!(vals, parse(Float64, t))
+                toks[i] == "," || push!(vals, parse(Float64, toks[i]))
                 i += 1
             end
             i += 1
             push!(arrays, name => vals)
-        elseif _is_number(toks[i])              # nested: name = number { … }
-            v = parse(Float64, toks[i])
+        elseif _is_number(toks[i]) && toks[i+1] == "{"      # nested level
+            v = parse(Float64, toks[i]); i += 1
+            sub_c, sub_a, _, i = _parse_table_body(toks, i)
+            push!(children, _MapNode(name, v, sub_c, sub_a))
+        else                                                # scalar setting (interp/extrap/flag)
+            settings[name] = _scalar_value(toks[i])
             i += 1
-            sub_children, sub_arrays, i = _parse_block(toks, i)
-            push!(children, _MapNode(name, v, sub_children, sub_arrays))
-        else
-            error("NPSS map parse: unexpected token '$(toks[i])' after '$name ='")
         end
     end
-    (children, arrays, i + 1)
+    (children, arrays, settings, i + 1)
 end
 
-# ── Table structure ───────────────────────────────────────────────────────────
+# Parse a subelement body.  `is_root` parses to end-of-tokens; otherwise toks[i]
+# is the opening "{" and parsing stops after the matching "}".
+function _parse_subelement_body(toks::Vector{String}, i::Int, is_root::Bool)
+    is_root || (i += 1)                                     # past "{"
+    scalars = Dict{String,Any}()
+    tables  = ParsedTable[]
+    subs    = ParsedSubelement[]
 
-"""
-Parsed NPSS map table, normalized to three levels.
-
-  argnames                   table arguments, e.g. ["ALPHA","NcMap","RlineMap"]
-  alphas                     outer-variable values (a single 0.0 for 2-level tables)
-  speeds[a]                  speed values for alpha index a
-  coords[a][n]               inner coordinate vector (Rline, PR, …)
-  values[a][n]               table quantity at each coordinate point
-"""
-struct NPSSMapTable
-    name::String
-    argnames::Vector{String}
-    quantity::String                          # leaf value-array name, e.g. "Wc"
-    alphas::Vector{Float64}
-    speeds::Vector{Vector{Float64}}
-    coords::Vector{Vector{Vector{Float64}}}
-    values::Vector{Vector{Vector{Float64}}}
-end
-
-function _leaf_to_arrays(node::_MapNode, coord_name::String, tname::String)
-    isempty(node.arrays) &&
-        error("NPSS map: $tname: no data arrays under $(node.var) = $(node.val)")
-    ci = findfirst(p -> first(p) == coord_name, node.arrays)
-    isnothing(ci) &&
-        error("NPSS map: $tname: coordinate array '$coord_name' missing under " *
-              "$(node.var) = $(node.val)")
-    vi = findfirst(p -> first(p) != coord_name, node.arrays)
-    isnothing(vi) &&
-        error("NPSS map: $tname: value array missing under $(node.var) = $(node.val)")
-    coord = last(node.arrays[ci])
-    vals  = last(node.arrays[vi])
-    length(coord) == length(vals) ||
-        error("NPSS map: $tname: coordinate/value length mismatch under " *
-              "$(node.var) = $(node.val) ($(length(coord)) vs $(length(vals)))")
-    (first(node.arrays[vi]), coord, vals)
-end
-
-function _build_table(name::String, argnames::Vector{String},
-                      children::Vector{_MapNode},
-                      arrays::Vector{Pair{String,Vector{Float64}}})
-    coord_name = argnames[end]
-    quantity   = ""
-
-    # Normalize 2-level tables (no ALPHA) to a single alpha = 0.0
-    alpha_nodes = if length(argnames) >= 3
-        children
-    else
-        [_MapNode(length(argnames) >= 1 ? argnames[1] : "ALPHA", 0.0,
-                  children, arrays)]
+    while i <= length(toks) && (is_root || toks[i] != "}")
+        t = toks[i]
+        if t == "Subelement"
+            stype, sname = toks[i+1], toks[i+2]
+            i += 3
+            sc, tb, sb, i = _parse_subelement_body(toks, i, false)
+            push!(subs, ParsedSubelement(stype, sname, sc, tb, sb))
+        elseif t == "Table"
+            tname = toks[i+1]
+            toks[i+2] == "(" || error("NPSS map: expected '(' after Table $tname")
+            i += 3
+            argn = String[]
+            while toks[i] != ")"
+                tk = toks[i]
+                (tk == "," || tk == "real" || tk == "int") || push!(argn, tk)
+                i += 1
+            end
+            i += 1                                          # past ')'
+            ch, arr, set, i = _parse_table_body(toks, i)
+            push!(tables, ParsedTable(tname, argn, ch, arr, set))
+        elseif i + 1 <= length(toks) && toks[i+1] == "="    # scalar: name = value
+            scalars[t] = _scalar_value(toks[i+2])
+            i += 3
+        else
+            i += 1                                          # stray token, skip
+        end
     end
+    is_root || (i += 1)                                     # past '}'
+    (scalars, tables, subs, i)
+end
+
+"""
+    read_npss_map(path) -> ParsedSubelement
+
+Parse an NPSS map file into a subelement tree.  The returned node is a synthetic
+file root whose `subelements`/`tables`/`scalars` are the file's top-level items.
+"""
+function read_npss_map(path::AbstractString)
+    toks = _map_tokens(read(path, String))
+    scalars, tables, subs, _ = _parse_subelement_body(toks, 1, true)
+    (isempty(tables) && isempty(subs)) &&
+        error("read_npss_map: no Table or Subelement blocks found in $path")
+    ParsedSubelement("", "__root__", scalars, tables, subs)
+end
+
+# ── Tree navigation ───────────────────────────────────────────────────────────
+
+_table_by_name(sub::ParsedSubelement, name) =
+    (for t in sub.tables; t.name == name && return t; end; nothing)
+
+"Depth-first search including `sub` itself."
+function _find_subelement(sub::ParsedSubelement, pred)
+    pred(sub) && return sub
+    for s in sub.subelements
+        r = _find_subelement(s, pred); r === nothing || return r
+    end
+    nothing
+end
+
+"Depth-first search of descendants only (not `sub`)."
+function _find_descendant(sub::ParsedSubelement, pred)
+    for s in sub.subelements
+        pred(s) && return s
+        r = _find_descendant(s, pred); r === nothing || return r
+    end
+    nothing
+end
+
+_getf(d::Dict, key, default) = haskey(d, key) ? Float64(d[key]) : Float64(default)
+
+# ── ParsedTable → MapTable ────────────────────────────────────────────────────
+
+function _coord_value(arrays, coord_name::AbstractString, tname)
+    ci = findfirst(p -> first(p) == coord_name, arrays)
+    isnothing(ci) && error("NPSS map: $tname: coordinate array '$coord_name' missing")
+    vi = findfirst(p -> first(p) != coord_name, arrays)
+    isnothing(vi) && error("NPSS map: $tname: value array missing")
+    coord, vals = last(arrays[ci]), last(arrays[vi])
+    length(coord) == length(vals) ||
+        error("NPSS map: $tname: coordinate/value length mismatch " *
+              "($(length(coord)) vs $(length(vals)))")
+    (coord, vals)
+end
+
+function _axes_from_settings(argn::Vector{String}, settings::Dict)
+    ax(name; di, de) = MapAxis(
+        Symbol(get(settings, "$name.interp", String(di))),
+        Symbol(get(settings, "$name.extrap", String(de))))
+    if length(argn) >= 3
+        (ax(argn[1]; di=:linear, de=:linear), ax(argn[2]; di=:lagrange3, de=:linear),
+         ax(argn[3]; di=:lagrange3, de=:linear))
+    else
+        (MapAxis(:linear, :linear), ax(argn[1]; di=:lagrange3, de=:linear),
+         ax(argn[2]; di=:lagrange3, de=:linear))
+    end
+end
+
+function _build_maptable(pt::ParsedTable)
+    coord_name = pt.argnames[end]
+    blocks = length(pt.argnames) >= 3 ?
+        [(nd.val, nd.children) for nd in pt.root_children] :
+        [(0.0, pt.root_children)]
 
     alphas = Float64[]
     speeds = Vector{Float64}[]
     coords = Vector{Vector{Float64}}[]
     values = Vector{Vector{Float64}}[]
-
-    for a in alpha_nodes
-        push!(alphas, a.val)
-        sp = Float64[]
-        co = Vector{Float64}[]
-        va = Vector{Float64}[]
-        for n in a.children
-            q, c, v = _leaf_to_arrays(n, coord_name, name)
-            quantity = q
-            push!(sp, n.val); push!(co, c); push!(va, v)
+    for (aval, speed_nodes) in blocks
+        isempty(speed_nodes) &&
+            error("NPSS map: $(pt.name): no speed lines (is this a 1-D table?)")
+        push!(alphas, aval)
+        sp, co, va = Float64[], Vector{Float64}[], Vector{Float64}[]
+        for snode in speed_nodes
+            c, v = _coord_value(snode.arrays, coord_name, pt.name)
+            push!(sp, snode.val); push!(co, c); push!(va, v)
         end
         push!(speeds, sp); push!(coords, co); push!(values, va)
     end
-
-    NPSSMapTable(name, argnames, quantity, alphas, speeds, coords, values)
+    MapTable(alphas, speeds, coords, values, _axes_from_settings(pt.argnames, pt.settings))
 end
 
-# ── Public API: reader ────────────────────────────────────────────────────────
+# ── Reynolds subelement → ReynoldsTables ──────────────────────────────────────
 
-"""
-    read_npss_map(path) -> Dict{String,NPSSMapTable}
+_has_re_tables(s::ParsedSubelement) = any(startswith(t.name, "s_") for t in s.tables)
 
-Parse an NPSS performance-map file.  Returns one entry per `Table` block,
-keyed by table name (`"TB_Wc"`, `"TB_PR"`, `"TB_eff"`, …).
-"""
-function read_npss_map(path::String)
-    toks = _map_tokens(read(path, String))
-    tables = Dict{String,NPSSMapTable}()
-
-    i = 1
-    while i <= length(toks)
-        if toks[i] == "Table"
-            tname = toks[i+1]
-            toks[i+2] == "(" || error("NPSS map parse: expected '(' after Table $tname")
-            i += 3
-            argnames = String[]
-            while toks[i] != ")"
-                t = toks[i]
-                (t == "," || t == "real" || t == "int") || push!(argnames, t)
-                i += 1
-            end
-            i += 1   # past ')'
-            children, arrays, i = _parse_block(toks, i)
-            tables[tname] = _build_table(tname, argnames, children, arrays)
-        else
-            i += 1
-        end
-    end
-
-    isempty(tables) && error("read_npss_map: no Table blocks found in $path")
-    tables
+function _onedim(pt::ParsedTable)
+    coord_name = pt.argnames[end]
+    _coord_value(pt.root_arrays, coord_name, pt.name)
 end
 
-# ── Conversion to PerformanceMap ──────────────────────────────────────────────
+function _build_reynolds(sub::Union{ParsedSubelement,Nothing})
+    sub === nothing && return nothing
+    eff_i  = findfirst(t -> occursin("eff", lowercase(t.name)), sub.tables)
+    flow_i = findfirst(t -> !occursin("eff", lowercase(t.name)) &&
+                            startswith(t.name, "s_"), sub.tables)
+    (eff_i === nothing || flow_i === nothing) && return nothing
+    coord, s_eff  = _onedim(sub.tables[eff_i])
+    _,     s_flow = _onedim(sub.tables[flow_i])
+    ReynoldsTables(coord, s_eff, s_flow, MapAxis(:linear, :linear))
+end
 
-"""Linear interpolation with end clamping; x need not be sorted."""
-function _interp1_clamped(x::Vector{Float64}, y::Vector{Float64}, xq::Float64)
-    p = sortperm(x)
-    xs, ys = x[p], y[p]
-    xq <= xs[1]   && return ys[1]
-    xq >= xs[end] && return ys[end]
-    k = searchsortedlast(xs, xq)
-    dx = xs[k+1] - xs[k]
-    dx ≈ 0.0 && return ys[k]   # vertical (choked) segment
-    ys[k] + (xq - xs[k]) / dx * (ys[k+1] - ys[k])
+# ── Public builders ───────────────────────────────────────────────────────────
+
+"""
+    compressor_map(path; flow="TB_Wc", pr="TB_PR", eff="TB_eff") -> CompressorMap
+
+Load an NPSS R-line compressor map.  Returns an **unscaled** `CompressorMap`
+(scale factors = 1) carrying the file's design anchors and Reynolds tables; call
+[`scale_map`](@ref) to place the cycle design point.  `flow`/`pr`/`eff` name the
+three tables and are overridable for files using other names.
+"""
+function compressor_map(path::AbstractString;
+                        flow::AbstractString = "TB_Wc",
+                        pr::AbstractString   = "TB_PR",
+                        eff::AbstractString  = "TB_eff")
+    root   = read_npss_map(path)
+    mapsub = _find_subelement(root, s -> _table_by_name(s, flow) !== nothing)
+    mapsub === nothing &&
+        error("compressor_map: no subelement contains table '$flow' in $path")
+    for nm in (pr, eff)
+        _table_by_name(mapsub, nm) === nothing &&
+            error("compressor_map: table '$nm' not found alongside '$flow'")
+    end
+    sc = mapsub.scalars
+    re = _build_reynolds(_find_descendant(mapsub, _has_re_tables))
+    CompressorMap{Float64}(
+        _build_maptable(_table_by_name(mapsub, flow)),
+        _build_maptable(_table_by_name(mapsub, pr)),
+        _build_maptable(_table_by_name(mapsub, eff)),
+        1.0, 1.0, 1.0, 1.0,
+        _getf(sc, "NcMapDes", 1.0), _getf(sc, "RlineMapDes", 2.0),
+        _getf(sc, "alphaMapDes", 0.0), _getf(sc, "RlineStall", 1.0), re)
 end
 
 """
-    to_performance_map(tables; alpha=0.0, flow="TB_Wc", pr="TB_PR",
-                       eff="TB_eff", nWc=25) -> PerformanceMap
+    turbine_map(path; flow="TB_Wp", eff="TB_eff") -> TurbineMap
 
-Convert a parsed NPSS compressor map (Rline-parameterized speed lines) to the
-rectangular `(Nc, Wc)` `PerformanceMap` the solver consumes.  For each speed
-line, PR and η are reinterpolated from Rline onto a common corrected-flow
-grid (`nWc` points spanning the map's full flow range); flow values outside a
-given speed line's range clamp to that line's end point.
-
-NPSS corrected flow is in lbm/s — pass the result through `scale_map` at the
-design point (the standard workflow), which makes the absolute flow units
-irrelevant.
+Load an NPSS PR-parameterized turbine map (flow `Wp` and efficiency are outputs;
+PR is an input).  Returns an **unscaled** `TurbineMap`; call [`scale_map`](@ref)
+to place the design point.
 """
-function to_performance_map(tables::Dict{String,NPSSMapTable};
-                            alpha::Float64 = NaN,
-                            flow::String = "TB_Wc",
-                            pr::String   = "TB_PR",
-                            eff::String  = "TB_eff",
-                            nWc::Int     = 25)
-    for t in (flow, pr, eff)
-        haskey(tables, t) || error("to_performance_map: table '$t' not found; " *
-                                   "available: $(join(sort(collect(keys(tables))), ", "))")
-    end
-    tWc, tPR, teff = tables[flow], tables[pr], tables[eff]
-
-    ai = isnan(alpha) ? 1 : findfirst(≈(alpha), tWc.alphas)
-    isnothing(ai) && error("to_performance_map: alpha=$alpha not in $(tWc.alphas)")
-
-    Nc_axis = tWc.speeds[ai]
-    (Nc_axis == tPR.speeds[ai] && Nc_axis == teff.speeds[ai]) ||
-        error("to_performance_map: speed grids differ between tables")
-
-    Wc_lines = tWc.values[ai]
-    Wc_all   = reduce(vcat, Wc_lines)
-    # Every source sample's flow value goes on the common axis, so each
-    # tabulated speed line — piecewise linear in Wc — is represented exactly
-    # (the clamp plateau beyond a line's range starts exactly at its end
-    # point, and no grid cell straddles a source breakpoint).  The `nWc`
-    # background grid only adds resolution for the cross-speed direction.
-    Wc_axis = sort!(unique!(vcat(
-        collect(range(minimum(Wc_all), maximum(Wc_all), length = nWc)), Wc_all)))
-
-    nN = length(Nc_axis)
-    PR_grid  = Matrix{Float64}(undef, nN, length(Wc_axis))
-    eta_grid = Matrix{Float64}(undef, nN, length(Wc_axis))
-
-    for i in 1:nN
-        (tWc.coords[ai][i] == tPR.coords[ai][i] == teff.coords[ai][i]) ||
-            error("to_performance_map: Rline grids differ between tables at " *
-                  "Nc=$(Nc_axis[i])")
-        Wc_line  = Wc_lines[i]
-        PR_line  = tPR.values[ai][i]
-        eff_line = teff.values[ai][i]
-        for (j, wq) in enumerate(Wc_axis)
-            PR_grid[i, j]  = _interp1_clamped(Wc_line, PR_line, wq)
-            eta_grid[i, j] = _interp1_clamped(Wc_line, eff_line, wq)
-        end
-    end
-
-    PerformanceMap(Nc_axis, Wc_axis, PR_grid, eta_grid)
+function turbine_map(path::AbstractString;
+                     flow::AbstractString = "TB_Wp",
+                     eff::AbstractString  = "TB_eff")
+    root   = read_npss_map(path)
+    mapsub = _find_subelement(root, s -> _table_by_name(s, flow) !== nothing)
+    mapsub === nothing &&
+        error("turbine_map: no subelement contains table '$flow' in $path")
+    _table_by_name(mapsub, eff) === nothing &&
+        error("turbine_map: table '$eff' not found alongside '$flow'")
+    sc = mapsub.scalars
+    re = _build_reynolds(_find_descendant(mapsub, _has_re_tables))
+    TurbineMap{Float64}(
+        _build_maptable(_table_by_name(mapsub, flow)),
+        _build_maptable(_table_by_name(mapsub, eff)),
+        1.0, 1.0, 1.0, 1.0,
+        _getf(sc, "NpMapDes", 1.0), _getf(sc, "PRmapDes", 1.5), re)
 end

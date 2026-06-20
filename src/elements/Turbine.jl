@@ -10,10 +10,16 @@ Modes:
   :pressure_closure — PR is auto-computed so the turbine exhausts to P_exit
                       (the compressor inlet pressure for a closed cycle).
                       Provide `P_exit` at construction.
-  :off_design       — PR and η from the performance map queried at (Nc, Wc_map),
-                      where Wc_map — the map flow coordinate — is an independent
-                      variable owned by the solver.  Residual: Wc_map - actual_Wc
-                      = 0.  Shaft speed itself belongs to the Shaft element.
+  :off_design       — the map is PR-parameterized (PR is its native *input*), so
+                      the expansion ratio PR is the independent variable owned by
+                      the solver.  The map evaluated forward at (Np, PR) returns
+                      the corrected flow Wp it passes and the efficiency; the
+                      residual is flow continuity Wp - actual_Wp = 0.  Pressure
+                      closure of the loop is enforced by the network back-edge,
+                      not here.  Shaft speed belongs to the Shaft element.
+
+An optional `reynolds::ReynoldsModel` supplies the abstract index fed to the
+map's Reynolds-correction tables; the default `nothing` disables the correction.
 
 Efficiency semantics are selected by `η_type` (see Compressor): :polytropic
 (default, small-stage integration) or :isentropic (adiabatic efficiency on
@@ -24,30 +30,32 @@ ForwardDiff Dual numbers for gradient-based design optimization.
 """
 mutable struct Turbine{T<:Real} <: AbstractElement
     name::String
-    PR::T            # expansion ratio (Pt_in / Pt_out)
+    PR::T            # expansion ratio (Pt_in / Pt_out); off-design solver independent
     η_poly::T        # efficiency value; meaning set by η_type
     η_type::Symbol   # :polytropic or :isentropic
-    map::Union{PerformanceMap, Nothing}
+    map::Union{TurbomachineMap, Nothing}
+    reynolds::Union{ReynoldsModel, Nothing}  # map Reynolds-index model (nothing ⇒ no correction)
     mode::Symbol
     N_shaft::Float64 # [rpm] — set by Shaft
     P_exit::T        # target exit pressure for :pressure_closure [Pa]
 
     inlet::Union{Port, Nothing}
     outlet::Union{Port, Nothing}
-    Wc_map::Float64
 end
 
 function Turbine(name::String;
                  PR      = 2.0,
                  η_poly   = 0.90,
                  η_type::Symbol = :polytropic,
-                 map::Union{PerformanceMap,Nothing} = nothing,
+                 map::Union{TurbomachineMap,Nothing} = nothing,
+                 reynolds::Union{ReynoldsModel,Nothing} = nothing,
                  mode::Symbol = :design,
                  P_exit   = 101325.0)
     η_type in (:polytropic, :isentropic) ||
         error("Turbine \"$name\": η_type must be :polytropic or :isentropic, got :$η_type")
     T = promote_type(typeof(PR), typeof(η_poly), typeof(P_exit))
-    Turbine{T}(name, T(PR), T(η_poly), η_type, map, mode, 0.0, T(P_exit), nothing, nothing, 0.0)
+    Turbine{T}(name, T(PR), T(η_poly), η_type, map, reynolds, mode, 0.0, T(P_exit),
+               nothing, nothing)
 end
 
 function compute!(el::Turbine, inlet::Port)::Port
@@ -59,13 +67,11 @@ function compute!(el::Turbine, inlet::Port)::Port
     PR_eff = if el.mode == :pressure_closure
         s.Pt / el.P_exit   # local only; el.PR left unchanged
     elseif el.mode == :off_design && !isnothing(el.map)
-        Nc = corrected_speed(el.N_shaft, s.Tt)
-        # Seed the map coordinate from the actual flow on the very first pass,
-        # before the solver has taken ownership of it.
-        el.Wc_map > 0.0 || (el.Wc_map = corrected_flow(s.W, s.Tt, s.Pt))
-        PR_map, η_map = query(el.map, Nc, el.Wc_map)
-        el.PR    = PR_map
-        el.η_poly = η_map
+        # PR is the solver independent (the map's native input); read η off the
+        # map at the current (Np, PR).
+        Np = corrected_speed(el.N_shaft, s.Tt)
+        rc = re_coord(el.reynolds, s)
+        el.η_poly = eval_map(el.map, Np, el.PR, rc).eff
         el.PR
     else
         el.PR
@@ -82,20 +88,22 @@ end
 
 n_residuals(el::Turbine) = el.mode == :off_design ? 1 : 0
 
+# Flow continuity: the corrected flow the map passes at (Np, PR) must equal the
+# actual corrected flow.  PR is the unknown that closes it; loop pressure closure
+# is handled by the network back-edge.
 function residuals(el::Turbine)
     el.mode == :off_design || return Float64[]
     s = el.inlet[]
-    Wc_act = corrected_flow(s.W, s.Tt, s.Pt)
-    [(el.Wc_map - Wc_act) / el.Wc_map]
+    Np = corrected_speed(el.N_shaft, s.Tt)
+    rc = re_coord(el.reynolds, s)
+    Wp_pred = eval_map(el.map, Np, el.PR, rc).Wp
+    Wp_act  = corrected_flow(s.W, s.Tt, s.Pt)
+    [(Wp_pred - Wp_act) / Wp_pred]
 end
 
-function indep_vars(el::Turbine)
-    el.mode == :off_design && return [el.Wc_map]
-    Float64[]
-end
-
+indep_vars(el::Turbine) = el.mode == :off_design ? [el.PR] : Float64[]
 function set_indep_vars!(el::Turbine, x::AbstractVector)
-    el.mode == :off_design && (el.Wc_map = x[1])
+    el.mode == :off_design && (el.PR = x[1])
 end
 
 specific_work(el::Turbine) =

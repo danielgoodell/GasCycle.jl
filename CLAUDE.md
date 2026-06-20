@@ -32,7 +32,7 @@ Include-order layering in `src/GasCycle.jl` (single module, no submodules): unit
 - **`core/`** — `FluidState{T<:Real}` (Pt, Tt, W, fluid), `Port` (mutable ref to a state), `AbstractElement`.
 - **`elements/`** — Compressor, Turbine, HeatExchanger, HeatSource, Radiator, Duct, Splitter, Mixer, Shaft. Each has design and (where applicable) off-design/map modes plus the off-design residual interface (`n_residuals`, `residuals`, `indep_vars`, `set_indep_vars!`).
 - **`network/FlowNetwork.jl`** — directed port graph; computes a flow plan; loops (recuperator, cold-end closure) are declared as back-edges.
-- **`solver/`** — `Solver.jl` includes `DesignSolve.jl`, `OffDesignSolve.jl`, `ResidualAssembly.jl`, etc. Back-edge `[Tt, Pt]` states are Newton unknowns; `one_pass!` propagates the cycle from seeds; NonlinearSolve.jl with `AutoForwardDiff()` closes the residual. Off-design adds map coordinates (`Wc_map` per turbomachine) and shaft speed to the same Newton vector (TrustRegion).
+- **`solver/`** — `Solver.jl` includes `DesignSolve.jl`, `OffDesignSolve.jl`, `ResidualAssembly.jl`, etc. Back-edge `[Tt, Pt]` states are Newton unknowns; `one_pass!` propagates the cycle from seeds; NonlinearSolve.jl with `AutoForwardDiff()` closes the residual. Off-design adds each turbomachine's native map line coordinate (compressor `Rline`, turbine `PR`) and shaft speed to the same Newton vector (TrustRegion).
 
 ### AD is a hard constraint
 
