@@ -244,6 +244,33 @@ sink temperatures in with `set_environment!(net, Dict("PanelA" => 251.3, …))`,
 re-solve, and hand `environment_heat(sol)` back as heat loads; iterate until
 both agree. Radiators can reject to a node with `Radiator(...; sink = node)`.
 
+## Assemblies: building blocks and bookkeeping
+
+Group elements into an `Assembly` with the same calls you use on a network,
+expose its connection points, and merge it with `add!(net, asm)`. Write a
+builder function and you can stamp out several units; nest assemblies (a PCU
+containing a TAC) for structure:
+
+```julia
+function tac_assembly()
+    tac = Assembly("TAC")
+    add!(tac, alt, comp, turb)
+    connect!(tac, alt => comp)
+    add_shaft!(tac, shaft; drives = [comp, alt], driven_by = turb)
+    expose!(tac, :inlet, alt); expose!(tac, :comp_out, comp, :outlet)
+    expose!(tac, :turb_in, turb, :inlet); expose!(tac, :outlet, turb)
+    expose!(tac, :elec, alt)
+    tac
+end
+```
+
+Inside a parent, connect to the exposed ports — `connect_port!(pcu, tac,
+:comp_out, recup, :inlet)`, `add_hx_pair!(pcu, recup; hot = tac)`,
+`connect_electrical!(pcu, tac => rect => user)`. After merging, names carry
+the path (`PCU1.TAC.Comp`), `pcu1["TAC.Comp"]` finds parts, and
+`losses_by_assembly(loss_ledger(sol), net)` totals the losses per unit.
+`examples/assemblies.jl` builds a two-PCU system this way.
+
 ## Where the energy goes
 
 `energy_balance(sol)` is the first-law check (heat in = shaft power + heat

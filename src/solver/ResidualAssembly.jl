@@ -86,7 +86,8 @@ function _back_edge_z0(net::FlowNetwork, back_edges)
     pairs = map(back_edges) do edge
         src_out = _get_outlet(net.elements[edge.src], edge.src_port)
         if isnothing(src_out)
-            [net.seed_state.Tt, net.seed_state.Pt]
+            g = _guess_state(net, edge)
+            [g.Tt, g.Pt]
         else
             [src_out[].Tt, src_out[].Pt]
         end

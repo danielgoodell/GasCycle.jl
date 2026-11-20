@@ -40,6 +40,7 @@ include("network/FlowNetwork.jl")
 include("network/Targets.jl")
 include("network/ElectricalNetwork.jl")
 include("network/ThermalNetwork.jl")
+include("network/Assembly.jl")
 include("solver/Solver.jl")
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ export electrical_report, electrical_frequency, shaft_power
 export ThermalBoundary, HeatLink, Pump, pump_power
 export add_conductance!, add_radiation!, add_loss_heat!, set_environment!
 export environment_nodes, environment_heat, heat_link_report
+export Assembly, expose!, assemblies, members, losses_by_assembly
 export Loss, LossLedger, energy_balance, loss_ledger, losses_by_kind, ledger_rows
 export stations   # summary(sol) extends Base.summary — no export needed
 export tsdiagram, tsdiagram!, mapplot, mapplot!, losswaterfall, losswaterfall!   # RecipesBase user plots

@@ -26,8 +26,12 @@ The network must be a tree (each node fed once, sources are alternators) and
 each connection must join matching kinds (:ac/:dc).
 """
 function connect_electrical!(net::FlowNetwork, chain)
-    nodes = _flatten_chain(chain)
-    for (a, b) in zip(nodes[1:end-1], nodes[2:end])
+    items = _flatten_chain(chain)
+    for (a, b) in zip(items[1:end-1], items[2:end])
+        # Assemblies connect through exposed nodes: :elec as a source,
+        # :elec_in (or :elec) as a destination.
+        a = _resolve_e(a, :elec)
+        b = b isa Assembly && haskey(b.eports, :elec_in) ? _resolve_e(b, :elec_in) : _resolve_e(b, :elec)
         ka, kb = e_kind_out(a), e_kind_in(b)
         isnothing(ka) && error("connect_electrical!: \"$(_e_name(a))\" is a load and cannot feed \"$(_e_name(b))\"")
         isnothing(kb) && error("connect_electrical!: \"$(_e_name(b))\" is a source and cannot be fed")

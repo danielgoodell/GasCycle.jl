@@ -274,6 +274,36 @@ one_pass!(net)                                 # single propagation (rarely need
 unknown seeded each iteration — used to close the loop through a cooler or
 radiator so the compressor inlet floats.
 
+## Assemblies
+
+```julia
+asm = Assembly(name)
+add!(asm, els...); connect!(asm, a => b); connect_port!(asm, …); add_hx_pair!(asm, hx; hot)
+add_shaft!(asm, …); set_boundary!(asm, …); connect_electrical!(asm, …)
+add_conductance!/add_radiation!/add_loss_heat!(asm, …); add_free!/add_target!/add_speed_control!(asm, …)
+add!(asm, sub_asm)                      # nesting
+expose!(asm, :inlet, el)                # fluid port (port defaults to the name)
+expose!(asm, :comp_out, comp, :outlet)  # fluid port under another name
+expose!(asm, :elec, alt)                # electrical node; :elec_in for a receiving node
+asm["Comp"]; asm["TAC.Comp"]            # parts by local name (walks sub-assemblies)
+add!(net, asm)                          # merge into a network: names become "ASM.Comp"
+assemblies(net); members(net, "PCU1.TAC")
+losses_by_assembly(ledger, net; depth=1)
+```
+
+An assembly wraps its own network and is merged (flattened) into the parent
+by `add!` — no run-time cost. Assemblies go anywhere an element goes in
+`connect!` (through exposed `:outlet`/`:inlet`), `connect_port!`,
+`add_hx_pair!(…; hot = asm)` (its `:outlet`), `set_state!` (its `:inlet`) and
+`connect_electrical!` (`:elec` as a source, `:elec_in` or `:elec` as a
+destination). Names of elements, shafts, electrical nodes, heat links and
+solver pairs get the assembly prefix; `ThermalBoundary` nodes are shared and
+keep their names. A network has one seed: give extra loops an initial guess
+with `set_boundary!` on their first inlet (the loop closure overrides it);
+an assembly that calls `set_state!` can only be merged into a network without
+a seed. Targets declared inside an assembly receive the whole network, so
+write them in terms of the assembly's own parts.
+
 ## Solver
 
 ```julia

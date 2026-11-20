@@ -192,10 +192,32 @@ function _inlet_port(el::AbstractElement, port::Symbol)
     el.inlet
 end
 
+# Ports joined inside an element (same stream): (inlet, outlet) pairs.
+_internal_links(el::AbstractElement) = [(:inlet, :outlet)]
+_internal_links(::HeatExchanger) = [(:hot_inlet, :hot_outlet), (:cold_inlet, :cold_outlet)]
+_internal_links(el::Splitter) = [(:inlet, p) for p in network_outlets(el)]
+_internal_links(el::Mixer) = [(p, :outlet) for p in network_required_inlets(el)]
+
+# Connected components of the port graph: Dict (element index, port) → root.
+function _stream_components(net::FlowNetwork)
+    parent = Dict{Tuple{Int,Symbol},Tuple{Int,Symbol}}()
+    find(x) = (haskey(parent, x) || (parent[x] = x);
+               parent[x] == x ? x : (parent[x] = find(parent[x])))
+    unite(a, b) = (ra = find(a); rb = find(b); ra == rb || (parent[ra] = rb))
+    for (i, el) in enumerate(net.elements), (a, b) in _internal_links(el)
+        unite((i, a), (i, b))
+    end
+    for e in net.edges
+        unite((e.src, _canon_outlet(net.elements[e.src], e.src_port)),
+              (e.dst, _canon_inlet(net.elements[e.dst], e.dst_port)))
+    end
+    Dict(k => find(k) for k in collect(keys(parent)))
+end
+
 """
 Open streams of a solved network: `entrances` (boundary streams, and the seed
 inlet when nothing feeds it — an open-loop model) and `exits` (outlets with no
-downstream element). Each entry is `(label, Port)`.
+downstream element). Each entry is `(label, Port, (element index, port))`.
 """
 function _open_streams(net::FlowNetwork)
     fed = Set{Tuple{Int,Symbol}}()
@@ -204,24 +226,26 @@ function _open_streams(net::FlowNetwork)
         push!(fed,  (e.dst, _canon_inlet(net.elements[e.dst], e.dst_port)))
         push!(srcs, (e.src, _canon_outlet(net.elements[e.src], e.src_port)))
     end
-    entrances = Tuple{String,Port}[]
+    entrances = Tuple{String,Port,Tuple{Int,Symbol}}[]
     for (i, port, _) in net.boundaries
         el = net.elements[i]
-        p = _inlet_port(el, _canon_inlet(el, port))
-        isnothing(p) || push!(entrances, ("$(el.name).$(_canon_inlet(el, port))", p))
+        cp_ = _canon_inlet(el, port)
+        (i, cp_) in fed && continue                       # overridden by a loop closure
+        p = _inlet_port(el, cp_)
+        isnothing(p) || push!(entrances, ("$(el.name).$cp_", p, (i, cp_)))
     end
     seed_el = net.elements[net.seed_el]
     seed_port = _canon_inlet(seed_el, :inlet)
     if !((net.seed_el, seed_port) in fed)
         p = _inlet_port(seed_el, seed_port)
-        isnothing(p) || push!(entrances, ("$(seed_el.name).$seed_port (seed)", p))
+        isnothing(p) || push!(entrances, ("$(seed_el.name).$seed_port (seed)", p, (net.seed_el, seed_port)))
     end
-    exits = Tuple{String,Port}[]
+    exits = Tuple{String,Port,Tuple{Int,Symbol}}[]
     for (i, el) in enumerate(net.elements)
         for port in _outlet_names(el)
             (i, port) in srcs && continue
             p = network_get_outlet(el, port)
-            isnothing(p) || push!(exits, ("$(el.name).$port", p))
+            isnothing(p) || push!(exits, ("$(el.name).$port", p, (i, port)))
         end
     end
     (entrances = entrances, exits = exits)
@@ -339,20 +363,23 @@ end
     default_dead_state(net) -> T0 [K]
 
 Lowest available heat-sink temperature: the minimum of radiator sink
-temperatures, boundary-stream inlet temperatures, and the seed-element inlet
-temperature.
+temperatures and the inlet temperatures of the system's real inflows
+(boundary streams, and the seed inlet of an open-loop model); for a closed
+loop with neither, the seed-element inlet temperature.
 """
 function default_dead_state(net::FlowNetwork)
     Ts = Float64[]
     for el in net.elements
         el isa Radiator && push!(Ts, _primal(_sink_T(el)))
     end
-    for (_, _, st) in net.boundaries
-        push!(Ts, _primal(st.Tt))
+    for (_, p) in _open_streams(net).entrances      # real boundary inflows (and an unfed seed)
+        push!(Ts, _primal(p[].Tt))
     end
-    p = _inlet_port(net.elements[net.seed_el], :inlet)
-    isnothing(p) || push!(Ts, _primal(p[].Tt))
-    isempty(Ts) && error("default_dead_state: solve the network first")
+    if isempty(Ts)
+        p = _inlet_port(net.elements[net.seed_el], :inlet)
+        isnothing(p) && error("default_dead_state: solve the network first")
+        push!(Ts, _primal(p[].Tt))
+    end
     minimum(Ts)
 end
 
@@ -407,12 +434,15 @@ function loss_ledger(net::FlowNetwork; T0::Real = default_dead_state(net))
         end
         append!(losses, element_losses(el, T0))
     end
-    # Open streams: net exergy carried out, grouped per fluid (mass in = mass
-    # out per fluid, so the arbitrary property reference states cancel).
+    # Open streams: net exergy carried out, grouped per physical stream (mass
+    # in = mass out per stream, so the arbitrary property reference states
+    # cancel). Streams are the connected components of the port graph.
     os = _open_streams(net)
-    for fl in unique(p[2][].fluid for p in [os.exits; os.entrances])
-        outs = [p for p in os.exits if p[2][].fluid === fl]
-        ins  = [p for p in os.entrances if p[2][].fluid === fl]
+    comp = _stream_components(net)
+    key(lp) = comp[lp[3]]
+    for k in unique(key.([os.exits; os.entrances]))
+        outs = [p for p in os.exits if key(p) == k]
+        ins  = [p for p in os.entrances if key(p) == k]
         ex = sum(p -> _H(p[2]) - T0 * _S(p[2]), outs; init = 0.0) -
              sum(p -> _H(p[2]) - T0 * _S(p[2]), ins;  init = 0.0)
         label = isempty(outs) ? join(first.(ins), ", ") : join(first.(outs), ", ")
@@ -491,3 +521,22 @@ end
 Base.show(io::IO, L::LossLedger) =
     print(io, "LossLedger(T0=$(round(_primal(L.T0), digits=2)) K, $(length(L.losses)) losses, ",
           "P_out=$(round(_primal(L.P_out)/1e3, digits=3)) kW)")
+
+"""
+    losses_by_assembly(ledger, net; depth = 1) -> Vector{Pair{String,Real}}
+
+Total exergy loss per assembly (paths up to `depth` levels, e.g. `"PCU1"` at
+depth 1, `"PCU1.TAC"` at depth 2), largest first. Losses outside any
+assembly are grouped under `"(top level)"`.
+"""
+function losses_by_assembly(L::LossLedger, net::FlowNetwork; depth::Int = 1)
+    paths = filter(p -> count(==('.'), p) < depth, net.assemblies)
+    sort!(paths; by = length, rev = true)                 # longest (deepest) match first
+    tot = Dict{String,Real}()
+    for l in L.losses
+        k = findfirst(p -> startswith(l.element, p * "."), paths)
+        key = isnothing(k) ? "(top level)" : paths[k]
+        tot[key] = get(tot, key, 0.0) + l.exergy
+    end
+    sort([k => v for (k, v) in tot]; by = p -> -_primal(p.second))
+end

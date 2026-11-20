@@ -79,11 +79,12 @@ mutable struct FlowNetwork
     electrical::Vector{Any}            # electrical nodes (incl. Alternators)
     e_edges::Vector{Tuple{Int,Int}}    # (src, dst) indices into `electrical`
     heat_links::Vector{HeatLink}
+    assemblies::Vector{String}         # paths of merged assemblies
 end
 
 FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing,
                             Tuple{Int,Symbol,FluidState}[], nothing,
-                            FreeVar[], Target[], Any[], Tuple{Int,Int}[], HeatLink[])
+                            FreeVar[], Target[], Any[], Tuple{Int,Int}[], HeatLink[], String[])
 
 _invalidate_plan!(net::FlowNetwork) = (net.plan = nothing)
 
@@ -292,6 +293,7 @@ back-edge is stripped (the loop is closed by `set_state!`).
 """
 function connect!(net::FlowNetwork, chain)
     ordered = _flatten_chain(chain)
+    any(x -> x isa Assembly, ordered) && return _connect_chain_with_assemblies!(net, ordered)
     if length(ordered) > 1 && ordered[end] === ordered[1]
         ordered = ordered[1:end-1]
     end
@@ -347,9 +349,10 @@ path must already be wired by `connect!`.  The optional `cold` keyword is
 accepted for backward compatibility but is no longer used.
 """
 function add_hx_pair!(net::FlowNetwork, hx::HeatExchanger;
-                      hot::AbstractElement, cold::Union{AbstractElement,Nothing}=nothing)
+                      hot, cold = nothing)
+    h, hp = _resolve(hot, :outlet)          # an element, or an assembly's exposed :outlet
     push!(net.edges,
-          PortEdge(_el_idx(net, hot), :outlet, _el_idx(net, hx), :hot_inlet, true))
+          PortEdge(_el_idx(net, h), hp, _el_idx(net, hx), :hot_inlet, true))
     _invalidate_plan!(net)
 end
 
@@ -392,6 +395,16 @@ the pass — including when seeds carry ForwardDiff Dual numbers.
 Without `back_edge_seeds`, falls back to seeding from the source element's
 stored outlet of the previous pass (legacy fixed-point behaviour).
 """
+# Initial guess for a back-edge before its source has been computed: a
+# boundary state set on the destination port (how extra loops of a multi-loop
+# model are seeded), else the network seed state.
+function _guess_state(net::FlowNetwork, edge::PortEdge)
+    for (i, p, st) in net.boundaries
+        i == edge.dst && p == edge.dst_port && return st
+    end
+    net.seed_state
+end
+
 function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
     isnothing(net.seed_state) && error("call set_state! before solving")
 
@@ -430,14 +443,14 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
             # evaluations into the next primal residual call.
             Tt_s = back_edge_seeds[2*be_idx - 1]
             Pt_s = back_edge_seeds[2*be_idx]
-            base = isnothing(src_out) ? net.seed_state : src_out[]
+            base = isnothing(src_out) ? _guess_state(net, edge) : src_out[]
             W_s = _strip_to_type(base.W, typeof(net.seed_state.W))
             _store_available!(avail, net, edge.dst, edge.dst_port,
                               Port(FluidState(Pt_s, Tt_s, W_s, base.fluid)))
         else
             # Legacy: seed from stored outlet of previous pass.
             _store_available!(avail, net, edge.dst, edge.dst_port,
-                              isnothing(src_out) ? Port(net.seed_state) : src_out)
+                              isnothing(src_out) ? Port(_guess_state(net, edge)) : src_out)
         end
     end
 

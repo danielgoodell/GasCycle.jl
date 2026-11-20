@@ -196,8 +196,25 @@ balance.
 - **Valves / bypass / pressure-loss elements** (Cv or K-factor): needed for
   coolant loop balancing and for turbine-bypass power control (item 6).
 
-### 5. Assemblies (high-level components)
-NPSS-style hierarchical assemblies: a named group of elements with exposed
+### 5. Assemblies (high-level components) — DONE 2026-11-20
+`Assembly` wraps its own network (all building calls work on it), exposes
+fluid and electrical connection points (`expose!`), nests, and is flattened
+into the parent by `add!` with name prefixing ("PCU1.TAC.Comp"); solver pairs
+declared inside travel with it. Bookkeeping: `asm["TAC.Comp"]`, `assemblies`,
+`members`, `losses_by_assembly`. The standard blocks (TAC, PCU) ship as
+builder templates in `examples/assemblies.jl` rather than fixed API — they
+need too many design parameters to freeze. Side fixes: open streams in the
+ledger are grouped by port-graph connectivity (two coolant loops with equal
+fluids were merged before); extra loops' first-pass guesses come from their
+boundary states.
+Follow-ups:
+- Several alternators feeding one DC bus (paralleled units) — the
+  electrical network is a tree today; needs a load-sharing rule (droop or
+  equal split) at the bus.
+- Per-assembly energy balance and summary sections; assembly-level
+  defaults/parameters.
+
+Original plan, for reference: NPSS-style hierarchical assemblies: a named group of elements with exposed
 ports, defaults, and its own targets.
 - `Assembly` type that the network flattens at build time (no runtime cost,
   same Newton vector).
