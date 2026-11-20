@@ -19,15 +19,15 @@ In :off_design mode:
 """
 mutable struct Shaft <: AbstractElement
     name::String
-    N::Float64                       # shaft speed [rpm]
+    N::Real                          # shaft speed [rpm] (off-design solver unknown)
     mode::Symbol
-    P_load::Float64                  # generator power extraction [W] (:off_design)
+    P_load::Real                     # generator power extraction [W] (:off_design)
     producers::Vector{AbstractElement}   # turbines
     consumers::Vector{AbstractElement}   # compressors
 end
 
-function Shaft(name::String; N::Float64 = 10000.0, mode::Symbol = :design,
-               P_load::Float64 = 0.0)
+function Shaft(name::String; N::Real = 10000.0, mode::Symbol = :design,
+               P_load::Real = 0.0)
     Shaft(name, N, mode, P_load, AbstractElement[], AbstractElement[])
 end
 

@@ -29,11 +29,15 @@ include("CycleMetrics.jl")
 
 Solve the flow network.
 
-Design-mode networks with circular dependencies (recuperators) are resolved by
-a Newton solve on the back-edge [Tt, Pt] states (`NewtonBacktracking`,
-ForwardDiff Jacobian). Off-design networks with explicit unknowns use a dogleg
-trust region (`DoglegTrustRegion`, finite-difference Jacobian). Pass `alg` to
-override the backend for either mode.
+Design-mode networks whose only unknowns are back-edge [Tt, Pt] states
+(recuperators, loop closures) are resolved by Newton (`NewtonBacktracking`,
+ForwardDiff Jacobian). Networks with element unknowns (off-design maps, shaft
+speed) or user free variables/targets (`add_free!`/`add_target!`) are solved
+as one normalized system by a dogleg trust region (`DoglegTrustRegion`,
+finite-difference Jacobian). Pass `alg` to override the backend.
+
+The system must be square: element unknowns + free variables must equal
+element residuals + targets.
 """
 function solve!(net::FlowNetwork;
                 tol::Float64  = 1e-6,
@@ -48,18 +52,23 @@ function solve!(net::FlowNetwork;
     n_x   = length(x0)
     n_res = sum(n_residuals(el) for el in net.elements; init=0) +
             sum(n_residuals(sh) for sh in net.shafts; init=0)
+    n_f = length(net.free_vars)
+    n_t = length(net.targets)
 
-    n_x == n_res || @warn "Solver: $n_x indeps but $n_res residuals — system may be over/under-determined"
+    if n_x + n_f != n_res + n_t
+        error("Solver: system is not square — $n_x element unknowns + $n_f free variables " *
+              "vs $n_res element residuals + $n_t targets. Each target needs a free " *
+              "variable (add_free!) and vice versa.")
+    end
 
     back_edges = filter(e -> e.back_edge, net.edges)
-    n_be = length(back_edges)
 
-    if n_x == 0
+    if n_x == 0 && n_f == 0
         return _solve_design!(net, back_edges; tol=tol, maxiter=maxiter, verbose=verbose,
                               alg = something(alg, NewtonBacktracking()))
     end
 
-    _solve_offdesign!(net, x0, slices, n_x, n_res, back_edges, n_be;
-                      tol=tol, maxiter=maxiter, verbose=verbose,
-                      alg = something(alg, DoglegTrustRegion()))
+    _solve_general!(net, x0, slices, back_edges;
+                    tol=tol, maxiter=maxiter, verbose=verbose,
+                    alg = something(alg, DoglegTrustRegion()))
 end

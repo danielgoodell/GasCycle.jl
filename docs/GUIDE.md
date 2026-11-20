@@ -132,7 +132,43 @@ no correction. A fixed-speed (alternator-locked) study just leaves the shaft in
 `examples/bru_tit_sweep_offdesign.jl`.
 
 `solve!` picks the mode automatically: if any element declares independent
-variables it runs the off-design Newton, otherwise the back-edge Newton.
+variables (or free variables are declared, below) it runs the coupled Newton,
+otherwise the back-edge Newton.
+
+## Targets and free variables
+
+Most studies are specified by outputs, not inputs: "deliver 10 kW", "hold
+design speed", "keep the compressor inlet at 400 K". Declare what the solver
+may vary with `add_free!` and what it must achieve with `add_target!`:
+
+```julia
+# Design: size the loop mass flow for 10 kW net shaft power
+add_free!(net, :W)                       # seed-state mass flow
+add_target!(net, net_power, 10e3)
+sol = solve!(net)
+
+# Two pairs: flow and compressor PR for power and compressor exit temperature
+add_free!(net, comp, :PR; lower=1.2, upper=4.0)
+add_target!(net, n -> comp.outlet[].Tt, 520.0; name="T2")
+
+# Off-design: reactor outlet temperature to hold design shaft speed
+add_free!(net, reactor, :TtExit)
+add_target!(net, n -> shaft.N, N_des)
+```
+
+The counts must balance (free variables + element unknowns = targets +
+element residuals). The current values are the initial guesses; `ref` sets the
+normalization of a free variable whose initial value is far from its typical
+magnitude, and `scale` sets the normalization of a target near zero.
+`clear_targets!(net)` removes all pairs. `solve!(net; verbose=true)` prints the
+converged free variables and targets.
+
+Targets compose with gradients: `ForwardDiff.derivative(η -> W_for_power(η), 0.88)`
+differentiates the *solved* free variable, including through off-design map
+solves and w.r.t. the target value itself. When differentiating, construct an
+element whose field is a free variable in the gradient's number type
+(`HeatSource("H"; TtExit = 1100.0 * one(eltype(p)))`) — the error message says
+so if you forget.
 
 ## Bleed flows
 

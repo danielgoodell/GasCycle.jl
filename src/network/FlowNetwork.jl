@@ -45,6 +45,25 @@ struct _FlowPlan
     n_edges::Int
 end
 
+# ── User solver pairs (free variables / targets) ─────────────────────────────
+# Declared with add_free! / add_target! (network/Targets.jl).
+
+struct FreeVar
+    name::String
+    get::Function       # () -> current value
+    set!::Function      # x -> nothing; writes the value into the model
+    ref::Float64        # normalization scale (NaN → |initial value|, or 1)
+    lower::Float64
+    upper::Float64
+end
+
+struct Target
+    name::String
+    f::Function         # net -> Real; evaluated after each pass
+    value::Real         # desired value (may carry Duals)
+    scale::Float64      # residual = (f(net) − value) / scale
+end
+
 # ── Network struct ────────────────────────────────────────────────────────────
 
 mutable struct FlowNetwork
@@ -55,10 +74,13 @@ mutable struct FlowNetwork
     seed_state::Union{FluidState,Nothing}
     boundaries::Vector{Tuple{Int,Symbol,FluidState}}  # extra boundary-stream inlets
     plan::Union{_FlowPlan,Nothing}
+    free_vars::Vector{FreeVar}
+    targets::Vector{Target}
 end
 
 FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing,
-                            Tuple{Int,Symbol,FluidState}[], nothing)
+                            Tuple{Int,Symbol,FluidState}[], nothing,
+                            FreeVar[], Target[])
 
 _invalidate_plan!(net::FlowNetwork) = (net.plan = nothing)
 

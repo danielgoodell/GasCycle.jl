@@ -30,13 +30,13 @@ ForwardDiff Dual numbers for gradient-based design optimization.
 """
 mutable struct Turbine{T<:Real} <: AbstractElement
     name::String
-    PR::T            # expansion ratio (Pt_in / Pt_out); off-design solver independent
-    η_poly::T        # efficiency value; meaning set by η_type
+    PR::Real         # expansion ratio (Pt_in / Pt_out); off-design solver independent
+    η_poly::Real     # efficiency value; meaning set by η_type (map output in off-design)
     η_type::Symbol   # :polytropic or :isentropic
     map::Union{TurbomachineMap, Nothing}
     reynolds::Union{ReynoldsModel, Nothing}  # map Reynolds-index model (nothing ⇒ no correction)
     mode::Symbol
-    N_shaft::Float64 # [rpm] — set by Shaft
+    N_shaft::Real    # [rpm] — set by Shaft
     P_exit::T        # target exit pressure for :pressure_closure [Pa]
 
     inlet::Union{Port, Nothing}
@@ -62,8 +62,8 @@ function compute!(el::Turbine, inlet::Port)::Port
     el.inlet = inlet
     s = inlet[]
 
-    # PR_eff is computed locally so Dual numbers can flow through pressure_closure
-    # without trying to store a Dual value into el.PR (which may be Float64).
+    # PR_eff is computed locally in pressure_closure mode so el.PR keeps the
+    # user's design value.
     PR_eff = if el.mode == :pressure_closure
         s.Pt / el.P_exit   # local only; el.PR left unchanged
     elseif el.mode == :off_design && !isnothing(el.map)

@@ -195,13 +195,18 @@ radiator so the compressor inlet floats.
 sol = solve!(net; tol=1e-6, maxiter=100, verbose=false, alg=nothing)   # -> SolveResult
 ```
 
-Mode is automatic: with no element unknowns, a back-edge Newton
-(`NewtonBacktracking`, ForwardDiff Jacobian) on the back-edge
-`[Tt, Pt]` states; with unknowns (off-design map line coordinates — compressor
-`Rline`, turbine `PR` — and shaft `N`), everything joins one normalized vector
-solved by `DoglegTrustRegion` (finite-difference Jacobian). `tol` is on the
-2-norm of the normalized residuals. Non-convergence warns and returns
-`status = :failed`.
+Mode is automatic: with no element unknowns and no free variables, a back-edge
+Newton (`NewtonBacktracking`, ForwardDiff Jacobian) on the back-edge
+`[Tt, Pt]` states; otherwise (off-design map line coordinates — compressor
+`Rline`, turbine `PR` — shaft `N`, and user free variables) everything joins one
+normalized vector solved by `DoglegTrustRegion` (finite-difference Jacobian).
+`tol` is on the 2-norm of the normalized residuals. Non-convergence warns and
+returns `status = :failed`. The system must be square (element unknowns + free
+variables = element residuals + targets), otherwise `solve!` throws.
+
+Both solves are differentiable: an outer `ForwardDiff` gradient/Hessian flows
+through the converged solution (implicit function theorem), in design and
+off-design, with or without targets.
 
 Solver backends (subtypes of `NonlinearBackend`; pass one as `alg` to override
 the mode default):
@@ -211,16 +216,46 @@ the mode default):
 | `NewtonBacktracking` | `jacobian=:forwarddiff` (or `:finitediff`), `max_backtracks=10` |
 | `DoglegTrustRegion` | `jacobian=:finitediff` (or `:forwarddiff`), `initial_radius=1.0`, `max_radius=1e3` (both relative to `max(‖u0‖,1)`) |
 
-Note: off-design unknowns are currently `Float64`, so `jacobian=:forwarddiff`
-applies to design-mode solves only.
+`jacobian=:forwarddiff` only works where the unknowns are not stored in
+concretely typed element fields, i.e. back-edge-only design solves (the
+default there).
 
 `SolveResult` fields: `status` (`:success`/`:failed`), `iterations`,
 `residual_norm`, `net`. `sol["Comp"]` looks an element up by name.
 
 ```julia
-net_power(sol)          # Σ turbine − Σ compressor power [W]
-cycle_efficiency(sol)   # net power / Σ heat input
+net_power(sol)          # Σ turbine − Σ compressor power [W]   (also net_power(net))
+cycle_efficiency(sol)   # net power / Σ heat input             (also cycle_efficiency(net))
 ```
+
+### Targets and free variables
+
+NPSS-style solver pairs: free variables are model inputs the solver varies;
+targets are model outputs it drives to a value. They join the same Newton
+vector as the element unknowns and back-edges, in design or off-design mode.
+
+```julia
+add_free!(net, el, :field; name, ref, lower, upper)   # element (or Shaft) field
+add_free!(net, :W; ...)                               # seed-state field: :W, :Tt, :Pt
+add_free!(net, "name"; get=() -> x, set! = v -> ..., ...)   # anything, via closures
+add_target!(net, f, value; name, scale)               # drive f(net) → value
+clear_targets!(net)                                   # remove all pairs
+```
+
+| Keyword | Meaning (default) |
+|---|---|
+| `ref` | normalization of the free variable (`\|initial value\|`, or 1 if zero) |
+| `lower`, `upper` | box bounds; trial values are clamped (`-Inf`, `Inf`) |
+| `scale` | target residual is `(f(net) − value)/scale` (`\|value\|`, or 1 if zero) |
+
+The current field value is the initial guess. `f` receives the network after
+each pass, so `net_power`, `cycle_efficiency`, or any closure such as
+`n -> comp.outlet[].Tt` works. `value` may carry Duals (differentiate w.r.t. a
+requirement). Under an outer gradient, a free variable on a concretely typed
+field (e.g. `HeatSource{Float64}.TtExit`) must be constructed in the gradient's
+number type — `solve!` explains how if it is not. Solver-owned fields
+(compressor `PR`/`η_poly`/`Rline`, turbine `PR`/`η_poly`, shaft `N`/`P_load`)
+are `Real`-typed and accept anything.
 
 ## Performance maps
 

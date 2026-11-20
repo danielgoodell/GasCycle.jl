@@ -33,6 +33,7 @@ include("elements/Mixer.jl")
 
 # ── Network & Solver ──────────────────────────────────────────────────────────
 include("network/FlowNetwork.jl")
+include("network/Targets.jl")
 include("solver/Solver.jl")
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ export link!
 export FlowNetwork, add!, connect!, connect_port!, add_shaft!, add_hx_pair!, set_state!, set_boundary!, one_pass!
 export solve!, cycle_efficiency, net_power, SolveResult
 export NonlinearBackend, NewtonBacktracking, DoglegTrustRegion
+export add_free!, add_target!, clear_targets!
 export stations   # summary(sol) extends Base.summary — no export needed
 export tsdiagram, tsdiagram!, mapplot, mapplot!   # RecipesBase user plots
 

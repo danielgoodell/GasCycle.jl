@@ -15,10 +15,11 @@ through a cooler or radiator, with gas and liquid property backends that are
 all AD-exact. `examples/optimize_cycle.jl` demonstrates exact gradients and
 Hessians through the full solve.
 
-What is missing is everything *around* the thermodynamic cycle: the solver
-can only close the loop it was built to close (no user targets), the shaft
+What is missing is everything *around* the thermodynamic cycle: the shaft
 ends in a scalar `P_load` (no electrical system, so no DC output figure), and
-losses are scattered across elements with no system-level accounting. Real
+losses are scattered across elements with no system-level accounting. User
+targets and free variables (item 1) are in place, so outputs such as a DC
+power figure become solvable requirements as soon as they exist. Real
 space power work is specified at the DC bus ("deliver N kWe"), sized by
 specific mass, and controlled by inventory and parasitic load.
 
@@ -30,9 +31,9 @@ control, and slow transients.
 These hold for every item below; they are what make the tool better than NPSS
 rather than a copy of it.
 
-- **AD through everything.** New elements are parametric in `T<:Real`; any
-  parameter that can become a free variable or design variable must not be
-  `Float64`-typed (note: `Shaft.P_load`/`Shaft.N` are currently `Float64`).
+- **AD through everything.** New elements are parametric in `T<:Real`;
+  fields the solver writes are typed `Real` so they accept an outer
+  gradient's Duals (see CLAUDE.md).
 - **Every element reports its losses** through one interface (item 2), so a
   system loss ledger and energy-closure check come for free.
 - **Multi-domain ports.** Fluid ports exist; electrical and heat ports are
@@ -58,24 +59,28 @@ rather than a copy of it.
 
 ## Phase A — Steady-state system modeling
 
-### 1. User-defined targets and free variables (solver)
-NPSS's most-used feature: declare `(free variable, target)` pairs and the
-solver adds them to the Newton vector. Examples: vary loop mass flow to hit
-2.0 kWe at the DC bus; vary TIT to hold a shaft speed; vary radiator area to
-hit a compressor inlet temperature; vary charge pressure (once item 6 exists)
-to hit a power level.
-- API sketch: `add_free!(net, el, :W)` / `add_target!(net, () -> dc_power(bus), 2000.0)`,
-  or a paired `add_balance!(net; vary=(el, :field), target=f, value=v)`.
-  Targets are arbitrary closures over the network state, so any computed
-  quantity (metrics, losses, electrical outputs) is targetable.
-- Works in both design and off-design solves; free variables appended to the
-  existing back-edge / map-coordinate vector. Count check (n_free == n_targets)
-  with a clear error.
-- Free-variable bounds and scaling (needed by TrustRegion on mixed-unit
-  vectors).
-- Exact AD through targets means the converged solution is still
-  differentiable w.r.t. design parameters — test against finite differences.
-- Also enables "inverse" design use: specify outputs, solve for inputs.
+### 1. User-defined targets and free variables (solver) — DONE 2026-11-19
+`add_free!` (element/shaft field, seed-state field, or get/set closures, with
+`ref` scaling and box bounds) and `add_target!` (any `net -> Real`) join the
+element unknowns and back-edges in one Newton vector, in design and
+off-design. Off-design solves became differentiable at the same time
+(solver-written fields typed `Real`; Jacobians on primal values with
+derivative parts converged after the primal). Tested against finite
+differences, including second derivatives and d/d(target value).
+Follow-ups:
+- A free variable on a concretely typed design field (e.g.
+  `HeatSource{Float64}.TtExit`) cannot hold an outer gradient's Duals; the
+  user must construct that element in the gradient's number type (clear
+  error message). If this proves annoying, type more parameter fields `Real`
+  rather than retyping networks. Cost reference: making the solver-written
+  fields `Real` plus type-generic residual assembly slowed the benchmark
+  solves by 8–36% (off-design 16.5 → 22.4 µs).
+- The coupled solve uses finite-difference Jacobians (the unknowns live in
+  typed fields, so ForwardDiff can't seed them). Fine at current sizes; an
+  exact alternative is a ForwardDiff Jacobian over a retyped copy of the
+  network, if conditioning ever demands it.
+- Report free variables/targets in `summary(sol)` (currently only
+  `solve!(net; verbose=true)` prints them).
 
 ### 2. Loss and energy accounting
 One interface, `losses(el) -> Vector{Loss}`, where each entry has a name, a
@@ -207,9 +212,6 @@ Size the cycle at one point while satisfying constraints at others
 - Network validation: error if `one_pass!` leaves elements unprocessed;
   convergence checks currently watch only outlet temperatures (not Pt, W,
   power).
-- Off-design unknowns are `Float64` (`_collect_indeps`), so the off-design
-  trust region uses a finite-difference Jacobian and off-design solves are
-  not yet differentiable; make indeps parametric (lands with item 1).
 - Case runner: run a table of cases (CSV in), collect named outputs
   (CSV / DataFrame out). NPSS 3.3 added native CSV I/O for the same reason.
 

@@ -7,7 +7,7 @@ Every concrete element must implement:
       Propagate thermodynamic state: read inlet, write and return outlet.
       Called once per solver iteration.
 
-  residuals(el) -> Vector{Float64}
+  residuals(el) -> Vector{<:Real}
       Return the element's constraint violations (should be ≈ 0 at convergence).
       Called once per solver iteration to build the global residual vector.
 
@@ -15,9 +15,11 @@ Every concrete element must implement:
       Number of residual equations this element contributes.
       Must be constant for a given element instance.
 
-  indep_vars(el) -> Vector{Float64}
+  indep_vars(el) -> Vector{<:Real}
       Current values of the element's independent (free) variables.
-      The solver adjusts these during iteration.
+      The solver adjusts these during iteration. Fields that hold them must
+      accept ForwardDiff Duals (type them `Real`), since the solver writes
+      Dual values when a gradient flows through the solve.
 
   set_indep_vars!(el, x::AbstractVector)
       Write a new set of independent variable values into the element.

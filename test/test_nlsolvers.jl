@@ -46,8 +46,9 @@ const _nlsolve = GasCycle.nlsolve
 
     # Derivatives through the solve: root of g(u, p) = 0 differentiated w.r.t. p
     # must match the implicit function theorem du/dp = -g_u⁻¹ g_p.
-    @testset "AD through the solve (IFT), $(nameof(typeof(alg)))" for alg in
-            (NewtonBacktracking(), DoglegTrustRegion(jacobian = :forwarddiff))
+    @testset "AD through the solve (IFT), $(nameof(typeof(alg))) / $(alg.jacobian)" for alg in
+            (NewtonBacktracking(), NewtonBacktracking(jacobian = :finitediff),
+             DoglegTrustRegion(jacobian = :forwarddiff), DoglegTrustRegion())
         function root(p)
             g(u) = [u[1]^3 + u[1] - p[1], u[2] - p[2] * u[1]^2]
             _nlsolve(alg, g, [one(eltype(p)), one(eltype(p))]; tol = 1e-12, maxiters = 50).u

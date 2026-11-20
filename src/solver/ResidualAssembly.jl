@@ -1,7 +1,12 @@
 # ── Helper: gather/scatter independent variables ──────────────────────────────
 
+# Promote a heterogeneous Real vector to its common numeric type (Float64 when
+# empty). Element unknowns/residuals may mix Float64 and Dual values.
+_promote_vec(v) = isempty(v) ? Float64[] :
+    convert(Vector{mapreduce(typeof, promote_type, v)}, v)
+
 function _collect_indeps(net::FlowNetwork)
-    x      = Float64[]
+    x      = Real[]
     slices = UnitRange{Int}[]
     for el in net.elements
         v = indep_vars(el)
@@ -13,7 +18,7 @@ function _collect_indeps(net::FlowNetwork)
         push!(slices, length(x)+1 : length(x)+length(v))
         append!(x, v)
     end
-    (x, slices)
+    (_promote_vec(x), slices)
 end
 
 function _scatter_indeps!(net::FlowNetwork, x::AbstractVector, slices)
@@ -29,14 +34,14 @@ function _scatter_indeps!(net::FlowNetwork, x::AbstractVector, slices)
 end
 
 function _collect_residuals(net::FlowNetwork)
-    F = Float64[]
+    F = Real[]
     for el in net.elements
         append!(F, residuals(el))
     end
     for sh in net.shafts
         append!(F, residuals(sh))
     end
-    F
+    _promote_vec(F)
 end
 
 """Collect all element outlet Tt values for convergence tracking."""

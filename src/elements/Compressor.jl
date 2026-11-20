@@ -28,23 +28,25 @@ Efficiency semantics are selected by `η_type`:
                           applied to the full Δh_is in one step.  This matches
                           NPSS `effDes`/map `eff` semantics.
 
-The type parameter T allows design variables PR and η_poly to carry
-ForwardDiff Dual numbers for gradient-based design optimization.
+The type parameter T records the numeric type of the design inputs. Fields the
+solver writes (PR and η_poly from the map in off-design, the R-line unknown,
+shaft speed) are `Real`-typed so they can hold ForwardDiff Duals whenever a
+gradient flows through the solve, regardless of T.
 """
 mutable struct Compressor{T<:Real} <: AbstractElement
     name::String
-    PR::T            # total pressure ratio
-    η_poly::T        # efficiency value; meaning set by η_type
+    PR::Real         # total pressure ratio (map output in off-design)
+    η_poly::Real     # efficiency value; meaning set by η_type
     η_type::Symbol   # :polytropic or :isentropic
     map::Union{TurbomachineMap, Nothing}
     reynolds::Union{ReynoldsModel, Nothing}  # map Reynolds-index model (nothing ⇒ no correction)
     mode::Symbol     # :design or :off_design
-    N_shaft::Float64 # shaft speed [rpm] — set by Shaft each iteration
+    N_shaft::Real    # shaft speed [rpm] — set by Shaft each iteration
 
     # State (written by compute!, read by residuals)
     inlet::Union{Port, Nothing}
     outlet::Union{Port, Nothing}
-    Rline::Float64   # map R-line coordinate — solver independent (off-design only)
+    Rline::Real      # map R-line coordinate — solver independent (off-design only)
 end
 
 function Compressor(name::String;

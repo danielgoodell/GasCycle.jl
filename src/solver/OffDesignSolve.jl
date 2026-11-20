@@ -1,53 +1,97 @@
-# ── Off-design solve ─────────────────────────────────────────────────────────
+# ── General solve: off-design unknowns + user free variables + back-edges ────
+#
+# Unknown vector  u = [element/shaft indeps; free variables; back-edge (Tt, Pt)]
+# Residual vector F = [element/shaft residuals; targets;     back-edge closure]
+#
+# Used for off-design (map coordinates, shaft speed) and for any solve with
+# add_free!/add_target! pairs, in design or off-design mode. The solve runs in
+# normalized unknowns v = u ./ uref so map coordinates, shaft speeds, flows and
+# thermodynamic states have similarly scaled columns.
 
-function _solve_offdesign!(net::FlowNetwork, x0::AbstractVector, slices,
-                           n_x::Int, n_res::Int, back_edges, n_be::Int;
-                           tol::Float64, maxiter::Int, verbose::Bool,
-                           alg::NonlinearBackend = DoglegTrustRegion())
-    # Unknown vector u = [element/shaft indeps; back-edge (Tt, Pt) pairs].
-    # The solve runs in normalized unknowns v = u ./ uref so map coordinates,
-    # shaft speeds, and thermodynamic states have similarly scaled columns.
-    u0   = vcat(x0, _back_edge_z0(net, back_edges))
-    uref = [abs(u) > 0 ? abs(u) : 1.0 for u in u0]
+_ref_scale(x) = (a = abs(Float64(_primal(x)))) > 0 ? a : 1.0
 
-    function od_residual(v)
-        F = zeros(eltype(v), length(v))
+function _solve_general!(net::FlowNetwork, x0::AbstractVector, slices, back_edges;
+                         tol::Float64, maxiter::Int, verbose::Bool,
+                         alg::NonlinearBackend = DoglegTrustRegion())
+    fvs  = net.free_vars
+    n_x  = length(x0)
+    n_f  = length(fvs)
+    n_be = length(back_edges)
+
+    f0 = _promote_vec(Real[fv.get() for fv in fvs])
+    z0 = _back_edge_z0(net, back_edges)
+    u0 = _promote_vec(Real[x0; f0; z0])
+
+    uref = Float64[_ref_scale(u) for u in u0]
+    for (k, fv) in enumerate(fvs)
+        isnan(fv.ref) || (uref[n_x + k] = fv.ref)
+    end
+
+    # Box bounds (normalized); only free variables are bounded.
+    bounded = any(fv -> isfinite(fv.lower) || isfinite(fv.upper), fvs)
+    lower = upper = nothing
+    if bounded
+        lower = fill(-Inf, length(u0)); upper = fill(Inf, length(u0))
+        for (k, fv) in enumerate(fvs)
+            lower[n_x + k] = fv.lower / uref[n_x + k]
+            upper[n_x + k] = fv.upper / uref[n_x + k]
+        end
+    end
+
+    ix = 1:n_x
+    iff = n_x+1 : n_x+n_f
+    iz = n_x+n_f+1 : n_x+n_f+2n_be
+
+    function apply!(u)
+        _scatter_indeps!(net, view(u, ix), slices)
+        for (k, fv) in enumerate(fvs)
+            fv.set!(u[n_x + k])
+        end
+        one_pass!(net, n_be == 0 ? nothing : u[iz])
+    end
+
+    function residual(v)
         u = v .* uref
-        _scatter_indeps!(net, view(u, 1:n_x), slices)
-        z = view(u, n_x+1:length(u))
-        one_pass!(net, n_be == 0 ? nothing : z)
-        r = _collect_residuals(net)
-        copyto!(F, 1, r, 1, length(r))
+        apply!(u)
+        z = u[iz]
+        r_el = _collect_residuals(net)
+        r_t  = Real[(t.f(net) - t.value) / t.scale for t in net.targets]
+        r_be = Real[]
         for (i, edge) in enumerate(back_edges)
             src_out = _get_outlet(net.elements[edge.src], edge.src_port)
             if isnothing(src_out)
-                F[n_res + 2i - 1] = 0.0
-                F[n_res + 2i]     = 0.0
+                push!(r_be, 0.0, 0.0)
             else
-                F[n_res + 2i - 1] = (src_out[].Tt - z[2i-1]) / z[2i-1]
-                F[n_res + 2i]     = (src_out[].Pt - z[2i])   / z[2i]
+                push!(r_be, (src_out[].Tt - z[2i-1]) / z[2i-1],
+                            (src_out[].Pt - z[2i])   / z[2i])
             end
         end
-        F
+        _promote_vec(Real[r_el; r_t; r_be])
     end
 
-    # TrustRegion rather than plain Newton for robustness far from the
-    # solution (map slope kinks at grid lines make undamped steps unreliable).
-    nls  = nlsolve(alg, od_residual, u0 ./ uref; tol = tol, maxiters = maxiter)
+    nls = nlsolve(alg, residual, u0 ./ uref; tol = tol, maxiters = maxiter,
+                  lower = lower, upper = upper)
 
     rn        = norm(nls.resid)
     converged = nls.converged
     iters     = nls.nsteps
 
-    u_final = nls.u .* uref
-    _scatter_indeps!(net, view(u_final, 1:n_x), slices)
-    one_pass!(net, n_be == 0 ? nothing : u_final[n_x+1:end])
+    # Final pass with the converged unknowns to restore all element fields.
+    apply!(nls.u .* uref)
 
     if verbose
         status = converged ? "converged" : "DID NOT CONVERGE"
-        println("Solver (off-design Newton): $status in $iters iters, |F| = $(round(Float64(rn), sigdigits=3))")
+        println("Solver (Newton, $(length(u0)) unknowns): $status in $iters iters, " *
+                "|F| = $(round(Float64(_primal(rn)), sigdigits=3))")
+        for fv in fvs
+            println("  free   $(rpad(fv.name, 24)) = $(round(Float64(_primal(fv.get())), sigdigits=8))")
+        end
+        for t in net.targets
+            println("  target $(rpad(t.name, 24)) = $(round(Float64(_primal(t.f(net))), sigdigits=8))" *
+                    "  (want $(round(Float64(_primal(t.value)), sigdigits=8)))")
+        end
     end
-    converged || @warn "GasCycle off-design Newton did not converge after $maxiter iterations (|F|=$rn)"
+    converged || @warn "GasCycle Newton did not converge after $maxiter iterations (|F|=$(_primal(rn)))"
 
     SolveResult(net, converged ? :success : :failed, iters, rn)
 end
