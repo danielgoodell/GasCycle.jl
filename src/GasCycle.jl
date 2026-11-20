@@ -21,12 +21,14 @@ include("maps/TurbomachineMap.jl")
 include("maps/NPSSMapReader.jl")
 
 # ── Elements ──────────────────────────────────────────────────────────────────
+include("elements/Thermal.jl")
 include("elements/Compressor.jl")
 include("elements/Turbine.jl")
 include("elements/Duct.jl")
 include("elements/Shaft.jl")
 include("elements/Electrical.jl")
 include("elements/Alternator.jl")
+include("elements/Pump.jl")
 include("elements/HeatSource.jl")
 include("elements/Radiator.jl")
 include("elements/HeatExchanger.jl")
@@ -37,6 +39,7 @@ include("elements/Mixer.jl")
 include("network/FlowNetwork.jl")
 include("network/Targets.jl")
 include("network/ElectricalNetwork.jl")
+include("network/ThermalNetwork.jl")
 include("solver/Solver.jl")
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -80,6 +83,9 @@ export Alternator, Cable, Converter, Rectifier, DCDCConverter, Transformer, Powe
 export ElectricalBus, ElectricalLoad, ParasiticLoad, ElecPoint, AbstractElectrical
 export connect_electrical!, add_speed_control!, electrical_power, parasitic_power
 export electrical_report, electrical_frequency, shaft_power
+export ThermalBoundary, HeatLink, Pump, pump_power
+export add_conductance!, add_radiation!, add_loss_heat!, set_environment!
+export environment_nodes, environment_heat, heat_link_report
 export Loss, LossLedger, energy_balance, loss_ledger, losses_by_kind, ledger_rows
 export stations   # summary(sol) extends Base.summary — no export needed
 export tsdiagram, tsdiagram!, mapplot, mapplot!, losswaterfall, losswaterfall!   # RecipesBase user plots

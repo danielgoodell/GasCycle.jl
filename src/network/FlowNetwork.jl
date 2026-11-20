@@ -78,11 +78,12 @@ mutable struct FlowNetwork
     targets::Vector{Target}
     electrical::Vector{Any}            # electrical nodes (incl. Alternators)
     e_edges::Vector{Tuple{Int,Int}}    # (src, dst) indices into `electrical`
+    heat_links::Vector{HeatLink}
 end
 
 FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing,
                             Tuple{Int,Symbol,FluidState}[], nothing,
-                            FreeVar[], Target[], Any[], Tuple{Int,Int}[])
+                            FreeVar[], Target[], Any[], Tuple{Int,Int}[], HeatLink[])
 
 _invalidate_plan!(net::FlowNetwork) = (net.plan = nothing)
 
@@ -403,6 +404,7 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
         _broadcast_speed!(sh)
     end
     _solve_electrical!(net)
+    _apply_heat_links!(net)
 
     # Seed the initial element's inlet
     _store_available!(avail, net, net.seed_el, :inlet, Port(net.seed_state))

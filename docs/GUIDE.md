@@ -212,6 +212,38 @@ PLR to zero and the solve reports failure.
 and parasitic power; the loss ledger carries the chain through to
 "net output (delivered electric)".
 
+## Heat paths outside the main components
+
+Heat links model heat that flows through walls rather than through a heat
+exchanger: conduction between two streams sharing a wall, a turbine casing
+leaking to structure, radiation from a duct to space, or power electronics
+dumping their losses into a coolant loop. A stream's end of a link is a
+`Duct` (its heat port); the other end is another duct, a `ThermalBoundary`
+environment node, or an electrical component's losses:
+
+```julia
+space = ThermalBoundary("Space"; T = 4.0)
+panel = ThermalBoundary("PanelA"; T = 245.0)
+casing = Duct("TurbCasing"; dPqP = 0.0)          # zero-loss segment after the turbine
+connect!(net, turb => casing => recup)
+add_radiation!(net, casing, space; area = 0.05, emissivity = 0.8)
+add_conductance!(net, casing, panel; UA = 0.5)
+add_conductance!(net, crossover, cold_duct; UA = 5.0)   # shared wall between two streams
+
+pump  = Pump("Pump"; ΔP = 50e3, η = 0.4)          # coolant loop for the electronics
+plate = Duct("ColdPlate"; dPqP = 0.0)
+connect!(net, pump => plate)
+connect_electrical!(net, bus => pump)              # pump runs off the DC bus
+add_loss_heat!(net, rect, plate)                   # rectifier losses into the coolant
+```
+
+Environment nodes stand for whatever surrounds the loop — use as many as the
+spacecraft model has (structure panels, deep space, a planet-facing sink).
+When coupling to an external spacecraft thermal model, push its equivalent
+sink temperatures in with `set_environment!(net, Dict("PanelA" => 251.3, …))`,
+re-solve, and hand `environment_heat(sol)` back as heat loads; iterate until
+both agree. Radiators can reject to a node with `Radiator(...; sink = node)`.
+
 ## Where the energy goes
 
 `energy_balance(sol)` is the first-law check (heat in = shaft power + heat

@@ -150,7 +150,10 @@ end
 # ── Component table ───────────────────────────────────────────────────────────
 
 _describe(el::AbstractElement) = ""
-_describe(el::Duct)       = @sprintf("dP/P=%.3f", _scalar(el.dPqP))
+_describe(el::Duct)       = @sprintf("dP/P=%.3f", _scalar(el.dPqP)) *
+    (el.heated ? @sprintf("  Q_wall=%.3f kW", _scalar(el.Q_ext) / 1e3) : "")
+_describe(el::Pump)       = @sprintf("ΔP=%.1f kPa  η=%.2f  P_elec=%.3f kW",
+                                     _scalar(el.ΔP) / 1e3, _scalar(el.η), _scalar(el.P_elec) / 1e3)
 _describe(el::Splitter)   = "fracs=" * string(el.fracs)
 _describe(el::Mixer)      = ""
 
@@ -190,7 +193,7 @@ end
 
 function _describe(el::Radiator)
     @sprintf("A=%.2f m²  ε_r=%.2f  Tsink=%.1f K  Q=%.2f kW",
-             _scalar(el.A), _scalar(el.emissivity), _scalar(el.T_sink),
+             _scalar(el.A), _scalar(el.emissivity), _scalar(_sink_T(el)),
              _scalar(Q_rejected(el)) / 1e3)
 end
 

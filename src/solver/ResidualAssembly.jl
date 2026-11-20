@@ -18,6 +18,11 @@ function _collect_indeps(net::FlowNetwork)
         push!(slices, length(x)+1 : length(x)+length(v))
         append!(x, v)
     end
+    for l in net.heat_links
+        v = indep_vars(l)
+        push!(slices, length(x)+1 : length(x)+length(v))
+        append!(x, v)
+    end
     (_promote_vec(x), slices)
 end
 
@@ -31,6 +36,10 @@ function _scatter_indeps!(net::FlowNetwork, x::AbstractVector, slices)
         set_indep_vars!(sh, view(x, slices[k]))
         k += 1
     end
+    for l in net.heat_links
+        set_indep_vars!(l, view(x, slices[k]))
+        k += 1
+    end
 end
 
 function _collect_residuals(net::FlowNetwork)
@@ -40,6 +49,9 @@ function _collect_residuals(net::FlowNetwork)
     end
     for sh in net.shafts
         append!(F, residuals(sh))
+    end
+    for l in net.heat_links
+        append!(F, residuals(l))
     end
     _promote_vec(F)
 end

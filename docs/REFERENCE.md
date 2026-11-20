@@ -209,6 +209,42 @@ Each node's operating point is in `node.e` (`V_in`, `V_out`, `f`, `I`, `P_in`,
 `P_out`, `P_loss`). Connections must match kinds (`:ac`/`:dc`); each node is
 fed once.
 
+### Pump
+
+```julia
+Pump(name; ΔP, η=0.5, kind=:dc)
+```
+
+Liquid coolant pump with a canned motor: Pt rises by `ΔP` [Pa]; electrical
+draw `P_elec = W·ΔP/(ρ·η)` (η = overall wire-to-water efficiency), all of
+which heats the coolant. Wire it with `connect_electrical!(net, bus => pump)`
+to draw from the cycle's bus; unwired, its power counts as an external input.
+`P_elec` is a solver unknown. `pump_power(pump)` gives the requirement at the
+current inlet state.
+
+### Heat links and environment nodes
+
+```julia
+ThermalBoundary(name; T)                                   # environment node (equivalent sink T [K])
+add_conductance!(net, a, b; UA)                            # Q = UA·(T_a − T_b)
+add_radiation!(net, a, b; area, emissivity=1, view_factor=1)  # Q = σ·ε·A·F·(T_a⁴ − T_b⁴)
+add_loss_heat!(net, component, duct; fraction=1)           # Q = fraction · electrical loss
+Radiator(...; sink = node)                                 # radiator rejects to a node's T
+set_environment!(net, Dict("node" => T, …))                # update node temperatures by name
+environment_nodes(net); environment_heat(sol)              # nodes; heat into each node [W]
+heat_link_report(sol)                                      # per link: kind, T_a, T_b, Q
+```
+
+Endpoints `a`, `b` are stream heat ports — `Duct`s in the network (a crossover
+duct, wall segment, or a zero-loss segment after a leaky casing) — or
+`ThermalBoundary` nodes; `Q` is positive from `a` to `b`. A stream presents
+the mean of its duct's inlet and outlet temperatures (lumped wall; split the
+duct, or use a `HeatExchanger` in `:UA` mode, if a link changes the stream
+temperature a lot). Each link's `Q` is a Newton unknown with the residual
+Q − model = 0, so links can join any parts of the loop, stay differentiable
+and can be targets. Electrical losses not routed with `add_loss_heat!` go to
+the surroundings.
+
 ### Element queries
 
 | Function | Meaning |
@@ -371,9 +407,11 @@ carried out by open streams — coolant loops, or the implicit cooler between a
 dangling outlet and the seeded inlet of an open-loop model), `P_shaft`
 (turbines − compressors), `P_alternator` (shaft power into alternators),
 `shaft_surplus` (`P_shaft − P_alternator`), `P_electric`, `P_delivered`,
-`P_parasitic`, `P_elec_losses`, `imbalance` (Σ enthalpy change of adiabatic
-elements; ≈ 0), `residual` (`Q_in − Q_out − Q_open − shaft_surplus −
-P_delivered − P_parasitic − P_elec_losses`; ≈ 0), `by_element`.
+`P_parasitic`, `P_elec_losses`, `Q_env` (heat to environment nodes through
+links), `Q_loss_to_streams`, `P_pumps`, `P_pumps_external`, `imbalance` (Σ
+enthalpy change of adiabatic elements; ≈ 0), `residual` (`Q_in +
+P_pumps_external + Q_loss_to_streams − Q_out − Q_open − Q_env − shaft_surplus
+− P_delivered − P_parasitic − P_elec_losses`; ≈ 0), `by_element`.
 
 `LossLedger` fields: `T0`, `Q_in`, `exergy_in` (`(name, W)` per heat source:
 enthalpy rise minus `T0` × the entropy rise of the constant-pressure heating),
@@ -390,8 +428,11 @@ part of heat sources, radiators and heat exchangers), `:heat_transfer`
 (finite-ΔT exchange), `:mixing`, `:heat_rejection` (exergy leaving with
 radiated or rejected heat, or with open streams — netted per fluid),
 `:electrical` (alternator: the part of its loss heat not recovered by the gas;
-cables and converters: the whole loss), `:parasitic` (PLR power),
-`:imbalance` (numerical energy imbalance of an adiabatic element).
+cables and converters: the whole loss, less what `add_loss_heat!` returns
+to a stream), `:parasitic` (PLR power), `:heat_transfer` also for
+stream-to-stream heat links, `:heat_leak` (exergy lost through links to
+environment nodes), `:pumping`, `:imbalance` (numerical energy imbalance of an
+adiabatic element).
 
 New element types join the accounting by defining `element_inlets(el)`,
 `element_outlets(el)` (default: `el.inlet`/`el.outlet`), `element_role(el)`

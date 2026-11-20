@@ -26,7 +26,8 @@ mutable struct Radiator{T<:Real} <: AbstractElement
     name::String
     A::T            # total radiating area [m²] (computed in :fixed_TtExit mode)
     emissivity::T   # surface emissivity (0–1)
-    T_sink::T       # effective radiation sink temperature [K]
+    T_sink::T       # effective radiation sink temperature [K] (unless `sink` is set)
+    sink::Union{ThermalBoundary,Nothing}   # environment node supplying T_sink
     TtExit::T       # target exit total temperature [K] (:fixed_TtExit mode)
     dPqP::T         # fractional total pressure loss
     mode::Symbol    # :fixed_area or :fixed_TtExit
@@ -45,22 +46,26 @@ function Radiator(name::String;
                   TtExit     = 400.0,
                   dPqP       = 0.01,
                   mode::Symbol = :fixed_area,
-                  N_seg::Int   = 50)
+                  N_seg::Int   = 50,
+                  sink::Union{ThermalBoundary,Nothing} = nothing)
     mode in (:fixed_area, :fixed_TtExit) ||
         error("Radiator $name: mode must be :fixed_area or :fixed_TtExit, got :$mode")
     mode == :fixed_area && A <= 0 &&
         error("Radiator $name: :fixed_area mode needs A > 0 (or use mode=:fixed_TtExit to size it)")
     T = promote_type(typeof(A), typeof(emissivity), typeof(T_sink),
                      typeof(TtExit), typeof(dPqP))
-    Radiator{T}(name, T(A), T(emissivity), T(T_sink), T(TtExit), T(dPqP),
+    Radiator{T}(name, T(A), T(emissivity), T(T_sink), sink, T(TtExit), T(dPqP),
                 mode, N_seg, nothing, nothing)
 end
+
+"""Effective sink temperature: the environment node's, if one is attached."""
+_sink_T(el::Radiator) = isnothing(el.sink) ? el.T_sink : el.sink.T
 
 """Segment-march the radiator at fixed area; returns (Tt_out, Pt_out)."""
 function _radiate_fixed_area(el::Radiator, s::FluidState)
     fp    = s.fluid
     σεdA  = _σ_SB * el.emissivity * el.A / el.N_seg
-    Ts4   = el.T_sink^4
+    Ts4   = _sink_T(el)^4
     dPqPs = el.dPqP / el.N_seg
 
     T = s.Tt
@@ -85,8 +90,8 @@ function _radiate_size_area(el::Radiator, s::FluidState)
     Pt_out = s.Pt * (1 - el.dPqP)
     Tt_out = el.TtExit
 
-    Tt_out > el.T_sink || error(
-        "Radiator $(el.name): TtExit=$(el.TtExit) K must exceed T_sink=$(el.T_sink) K " *
+    Tt_out > _sink_T(el) || error(
+        "Radiator $(el.name): TtExit=$(el.TtExit) K must exceed T_sink=$(_sink_T(el)) K " *
         "(radiative rejection cannot cool below the sink)")
     s.Tt > Tt_out || error(
         "Radiator $(el.name): inlet Tt=$(s.Tt) K must exceed TtExit=$(el.TtExit) K")
@@ -97,7 +102,7 @@ function _radiate_size_area(el::Radiator, s::FluidState)
     h_out = enthalpy(fp, Tt_out, Pt_out)
     dh    = (h_out - h_in) / el.N_seg
     σε    = _σ_SB * el.emissivity
-    Ts4   = el.T_sink^4
+    Ts4   = _sink_T(el)^4
 
     A = zero(h_in)
     T_prev = s.Tt

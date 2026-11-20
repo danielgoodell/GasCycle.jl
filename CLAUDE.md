@@ -9,7 +9,7 @@ GasCycle.jl — a Julia package for closed Brayton cycle analysis (He-Xe working
 ## Commands
 
 ```bash
-# Full test suite (~690 tests)
+# Full test suite (~750 tests)
 julia --project -e 'using Pkg; Pkg.test()'
 
 # Single test file (each is standalone: does `using Test; using GasCycle` itself)
@@ -33,6 +33,7 @@ Include-order layering in `src/GasCycle.jl` (single module, no submodules): unit
 - **`elements/`** — Compressor, Turbine, HeatExchanger, HeatSource, Radiator, Duct, Splitter, Mixer, Shaft. Each has design and (where applicable) off-design/map modes plus the off-design residual interface (`n_residuals`, `residuals`, `indep_vars`, `set_indep_vars!`).
 - **`network/FlowNetwork.jl`** — directed port graph; computes a flow plan; loops (recuperator, cold-end closure) are declared as back-edges.
 - **Electrical** — `elements/Electrical.jl` (cables, converters, buses, loads; `AbstractElectrical`, `ElecPoint`), `elements/Alternator.jl` (gas-path element + electrical source + shaft consumer), `network/ElectricalNetwork.jl` (`connect_electrical!`, `_solve_electrical!` called at the start of `one_pass!`, `add_speed_control!`). Radial tree; power-flow level (no reactive power). Shafts sum `shaft_power(el)` over producers/consumers.
+- **Thermal** — `elements/Thermal.jl` (`ThermalBoundary`, `HeatLink`), `elements/Pump.jl`, `network/ThermalNetwork.jl` (`add_conductance!`/`add_radiation!`/`add_loss_heat!`, `_apply_heat_links!` in `one_pass!` after the electrical solve, `_init_couplings!` in `solve!`). Stream endpoints are `Duct` heat ports (mean temperature). Link `Q` and pump `P_elec` are Newton unknowns.
 - **`output/Accounting.jl`** — `energy_balance` (first law) and `loss_ledger` (exergy; closure residual is an exact identity, so treat a nonzero one as a model bug). New element types plug in via `element_inlets`/`element_outlets`/`element_role`/`element_losses`.
 - **`network/Targets.jl`** — user solver pairs: `add_free!` (element field, seed-state field, or get/set closures) and `add_target!` (any `net -> Real`).
 - **`solver/`** — `Solver.jl` includes `DesignSolve.jl`, `OffDesignSolve.jl`, `ResidualAssembly.jl`, etc. Back-edge `[Tt, Pt]` states are Newton unknowns; `one_pass!` propagates the cycle from seeds; the built-in solvers in `NonlinearSolvers.jl` close the residual. Back-edge-only design solves use `NewtonBacktracking` (ForwardDiff Jacobian). Anything with element unknowns (off-design map line coordinates — compressor `Rline`, turbine `PR` — and shaft speed) or user free variables/targets goes through `_solve_general!` in `OffDesignSolve.jl` (`DoglegTrustRegion`, finite-difference Jacobian). Jacobians are always primal Float64 matrices; derivative parts of Dual-valued unknowns are converged after the primal by `_refine_partials` (implicit function theorem). Dependencies are kept deliberately light (no NonlinearSolve/SciML); heavier backends belong in package extensions behind the `NonlinearBackend` interface.

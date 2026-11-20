@@ -156,8 +156,31 @@ electrical chain whose output is the DC power the mission actually specifies.
 - Validate against BRU/SNAP-era alternator and PCU data (NASA reports
   already in `reference/` and the BRU literature).
 
-### 4. Heat ports and thermal coupling between subsystems
-Losses in the alternator, PCU, bearings, and cables end up as heat in a
+### 4. Heat ports and thermal coupling between subsystems — DONE 2026-11-20
+Implemented: `Duct` heat port; `ThermalBoundary` environment nodes (several,
+named, settable with `set_environment!` — the hook for a spacecraft thermal
+model such as Thermal Desktop supplying equivalent sink temperatures, with
+`environment_heat` returning the heat loads); links `add_conductance!`,
+`add_radiation!`, `add_loss_heat!` (electrical losses into a coolant);
+`Radiator(...; sink = node)`; `Pump` (canned motor, wired to a bus or on
+external power). Link heat flows and pump power are Newton unknowns.
+Accounting extended (heat_leak, stream-to-stream heat transfer, pumping,
+credit for recovered loss heat). Decisions (2026-11-20, with the user): lumped
+mean stream temperature per duct — link-induced temperature changes are
+expected to be small; segment ducts or use a UA heat exchanger otherwise.
+Follow-ups:
+- Solvable thermal nodes (a structure panel with its own temperature that
+  both conducts to the gas and radiates to space) — the step toward
+  thermal-mass nodes for transients (item 10).
+- Component temperatures (alternator magnets/windings, electronics
+  baseplates) from their cooling streams, with limits — needed to judge the
+  alternator placement trade (item 3 follow-up).
+- Valves / bypass / K-factor pressure-loss elements — moved to item 6, where
+  they serve inventory and bypass control.
+- An automated co-simulation driver for an external thermal model (file or
+  FMI exchange) once a concrete model/format is chosen.
+
+Original plan, for reference: losses in the alternator, PCU, bearings, and cables end up as heat in a
 fluid stream, and that coupling is what closes the system-level energy
 balance.
 - **Heat port**: a heat flow [W] with a source temperature, connecting a

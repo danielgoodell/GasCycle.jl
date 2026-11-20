@@ -29,8 +29,9 @@ One entry of the loss ledger: `exergy` [W] destroyed (T0·S_gen) or rejected at
 `:pressure` (total-pressure loss), `:heat_transfer` (finite-ΔT heat exchange),
 `:mixing`, `:heat_rejection` (exergy leaving with rejected heat or an open
 stream), `:electrical` (alternator, cable and converter losses),
-`:parasitic` (power dumped in parasitic loads), `:imbalance` (numerical
-energy imbalance of an element).
+`:parasitic` (power dumped in parasitic loads), `:heat_leak` (exergy lost
+through heat links to environment nodes), `:pumping` (pump irreversibility),
+`:imbalance` (numerical energy imbalance of an element).
 """
 struct Loss
     element::String
@@ -55,12 +56,18 @@ element_role(::Turbine)         = :work_out
 element_role(::HeatSource)      = :heat_in
 element_role(::Radiator)        = :heat_out
 element_role(::Alternator)      = :alternator   # shaft in, electricity out, loss heats the gas
+element_role(::Pump)            = :pump         # electricity in, all of it heats the coolant
+
+# Heat an adiabatic element receives from heat links [W].
+external_heat(::AbstractElement) = 0.0
+external_heat(el::Duct)          = el.heated ? el.Q_ext : 0.0
 
 loss_kind(::AbstractElement) = :pressure
 loss_kind(::Compressor)      = :aero
 loss_kind(::Turbine)         = :aero
 loss_kind(::Mixer)           = :mixing
 loss_kind(::Splitter)        = :mixing
+loss_kind(::Pump)            = :pumping
 
 _H(p::Port) = (s = p[]; s.W * enthalpy(s))
 _S(p::Port) = (s = p[]; s.W * entropy(s))
@@ -112,9 +119,50 @@ function element_losses(el::Alternator, T0)
      Loss(el.name, :pressure, T0 * dSp)]
 end
 
+# Duct: only its pressure loss here; heat through its port is booked per
+# heat link (`_link_losses`).
+element_losses(el::Duct, T0) = [Loss(el.name, :pressure, T0 * _dS_pressure(el.inlet, el.outlet))]
+
 # Electrical side: per node (P_in, P_loss) bookkeeping.
-_elec_losses(net) = sum(el -> el.e.P_loss,
-    (el for el in net.electrical if !(el isa Alternator) && !(el isa ElectricalLoad)); init = 0.0)
+_is_conversion(el) = !(el isa Union{Alternator,ElectricalLoad,Pump})
+_elec_losses(net) = sum(el -> el.e.P_loss, (el for el in net.electrical if _is_conversion(el)); init = 0.0)
+
+_wired(net, el) = any(x -> x === el, net.electrical)
+
+# Exergy per joule of heat entering duct d's stream: exact from the duct's
+# states (ΔEx_th / Q_ext), with the 1 − T0/T limit when no net heat enters.
+function _exergy_per_heat(d::Duct, T0)
+    Q = d.Q_ext
+    if abs(_primal(Q)) > 0
+        dS_th = _S(d.outlet) - _S(d.inlet) - _dS_pressure(d.inlet, d.outlet)
+        1 - T0 * dS_th / Q
+    else
+        1 - T0 / d.inlet[].Tt
+    end
+end
+
+# Exergy destroyed or lost by each heat link. Summed over the links of a duct
+# this equals the exergy its stream loses through its heat port, exactly.
+function _link_losses(net, T0)
+    out = Loss[]
+    for l in net.heat_links
+        ea = l.a isa Duct ? _exergy_per_heat(l.a, T0) : 0.0
+        eb = l.b isa Duct ? _exergy_per_heat(l.b, T0) : 0.0
+        if l.kind === :loss
+            # Credit the electrical component with the exergy its heat gives the stream.
+            push!(out, Loss(l.a.name, :electrical, -l.Q * eb))
+        else
+            kind = (l.a isa Duct && l.b isa Duct) ? :heat_transfer : :heat_leak
+            push!(out, Loss(l.name, kind, l.Q * (ea - eb)))
+        end
+    end
+    out
+end
+
+# Heat into environment nodes through links, and electrical loss heat into streams.
+_Q_env(net) = sum(l -> (l.b isa ThermalBoundary ? l.Q : 0.0) - (l.a isa ThermalBoundary ? l.Q : 0.0),
+                  net.heat_links; init = 0.0)
+_Q_loss_to_streams(net) = sum(l -> l.kind === :loss ? l.Q : 0.0, net.heat_links; init = 0.0)
 
 # Exergy supplied to the fluid by a heat source: enthalpy rise minus T0 times
 # the entropy rise of the constant-pressure heating part.
@@ -203,16 +251,21 @@ First-law accounting of a solved network [W]:
 - `P_electric`  — alternator electrical output
 - `P_delivered`, `P_parasitic`, `P_elec_losses` — where it goes: useful
                   loads, parasitic loads, cables and converters
+- `Q_env`       — net heat leaked to environment nodes through heat links
+- `Q_loss_to_streams` — electrical loss heat routed into streams
+- `P_pumps`, `P_pumps_external` — pump power, and the part not drawn from
+                  the cycle's own electrical network
 - `imbalance`   — Σ enthalpy imbalance of adiabatic elements (should be ≈ 0)
-- `residual`    — `Q_in − Q_out − Q_open − shaft_surplus − P_delivered −
-                  P_parasitic − P_elec_losses` (≈ 0; equals `imbalance`)
+- `residual`    — `Q_in + P_pumps_external + Q_loss_to_streams − Q_out −
+                  Q_open − Q_env − shaft_surplus − P_delivered − P_parasitic −
+                  P_elec_losses` (≈ 0; equals `imbalance`)
 - `by_element`  — `(name, role, value)` per element (heat/work [W], or the
                   imbalance for adiabatic elements)
 """
 energy_balance(r::SolveResult) = energy_balance(r.net)
 
 function energy_balance(net::FlowNetwork)
-    Q_in = Q_out = W_in = W_out = imb = P_alt = P_el = 0.0
+    Q_in = Q_out = W_in = W_out = imb = P_alt = P_el = P_pump = P_pump_ext = 0.0
     by_el = Tuple{String,Symbol,Real}[]
     for el in net.elements
         dH = _Hsum(element_outlets(el)) - _Hsum(element_inlets(el))
@@ -229,11 +282,16 @@ function energy_balance(net::FlowNetwork)
             P_alt += el.P_mech
             P_el  += el.e.P_out
             imb   += dH - (el.P_mech - el.e.P_out)
+        elseif role === :pump
+            P_pump += el.P_elec
+            _wired(net, el) || (P_pump_ext += el.P_elec)
+            imb += dH - el.P_elec
         else
-            imb += dH
+            imb += dH - external_heat(el)
         end
         push!(by_el, (el.name, role, role in (:heat_out, :work_out) ? -dH :
-                                     role === :alternator ? el.P_mech : dH))
+                                     role === :alternator ? el.P_mech :
+                                     role === :pump ? el.P_elec : dH))
     end
     os = _open_streams(net)
     Q_open = sum(p -> _H(p[2]), os.exits; init = 0.0) -
@@ -241,11 +299,14 @@ function energy_balance(net::FlowNetwork)
     P = W_out - W_in
     surplus = P - P_alt
     P_del, P_par, P_eloss = electrical_power(net), parasitic_power(net), _elec_losses(net)
+    Q_env, Q_l2s = _Q_env(net), _Q_loss_to_streams(net)
     (Q_in = Q_in, Q_out = Q_out, Q_open = Q_open, P_shaft = P,
      P_alternator = P_alt, shaft_surplus = surplus, P_electric = P_el,
      P_delivered = P_del, P_parasitic = P_par, P_elec_losses = P_eloss,
-     imbalance = imb,
-     residual = Q_in - Q_out - Q_open - surplus - P_del - P_par - P_eloss,
+     Q_env = Q_env, Q_loss_to_streams = Q_l2s, P_pumps = P_pump,
+     P_pumps_external = P_pump_ext, imbalance = imb,
+     residual = Q_in + P_pump_ext + Q_l2s - Q_out - Q_open - Q_env - surplus -
+                P_del - P_par - P_eloss,
      by_element = by_el)
 end
 
@@ -284,7 +345,7 @@ temperature.
 function default_dead_state(net::FlowNetwork)
     Ts = Float64[]
     for el in net.elements
-        el isa Radiator && push!(Ts, _primal(el.T_sink))
+        el isa Radiator && push!(Ts, _primal(_sink_T(el)))
     end
     for (_, _, st) in net.boundaries
         push!(Ts, _primal(st.Tt))
@@ -332,10 +393,17 @@ function loss_ledger(net::FlowNetwork; T0::Real = default_dead_state(net))
             P_alt += el.P_mech
             imb = dH - (el.P_mech - el.e.P_out)
             abs(_primal(imb)) > 0 && push!(losses, Loss(el.name, :imbalance, -imb))
-        elseif role === :adiabatic && abs(_primal(dH)) > 0
+        elseif role === :pump
+            # Power from outside the model is an exergy input; drawn from the
+            # cycle's own bus it is already inside the electrical bookkeeping.
+            _wired(net, el) || push!(ex_in, ("$(el.name) (external power)", el.P_elec))
+            imb = dH - el.P_elec
+            abs(_primal(imb)) > 0 && push!(losses, Loss(el.name, :imbalance, -imb))
+        elseif role === :adiabatic
             # Energy an adiabatic element creates/destroys is a model error,
             # but it must be booked for the exergy identity to close.
-            push!(losses, Loss(el.name, :imbalance, -dH))
+            imb = dH - external_heat(el)
+            abs(_primal(imb)) > 0 && push!(losses, Loss(el.name, :imbalance, -imb))
         end
         append!(losses, element_losses(el, T0))
     end
@@ -352,8 +420,9 @@ function loss_ledger(net::FlowNetwork; T0::Real = default_dead_state(net))
     end
     # Electrical side: conversion losses and parasitic loads are destroyed
     # exergy (dissipated as heat to the surroundings).
+    append!(losses, _link_losses(net, T0))
     for el in net.electrical
-        el isa Alternator && continue
+        el isa Union{Alternator,Pump} && continue
         if el isa ElectricalLoad
             el.parasitic && push!(losses, Loss(el.name, :parasitic, el.e.P_in))
         else

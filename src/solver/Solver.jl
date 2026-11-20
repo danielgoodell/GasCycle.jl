@@ -45,13 +45,19 @@ function solve!(net::FlowNetwork;
                 verbose::Bool = false,
                 alg::Union{Nothing,NonlinearBackend} = nothing)
 
-    # Initial pass to populate element outlet states and seed back-edge guesses.
+    # Initial pass to populate element outlet states and seed back-edge guesses,
+    # then start heat links / pumps at their model values and pass again.
     one_pass!(net)
+    if !isempty(net.heat_links) || any(el -> el isa Pump, net.elements)
+        _init_couplings!(net)
+        one_pass!(net)
+    end
 
     x0, slices = _collect_indeps(net)
     n_x   = length(x0)
     n_res = sum(n_residuals(el) for el in net.elements; init=0) +
-            sum(n_residuals(sh) for sh in net.shafts; init=0)
+            sum(n_residuals(sh) for sh in net.shafts; init=0) +
+            length(net.heat_links)
     n_f = length(net.free_vars)
     n_t = length(net.targets)
 
