@@ -172,6 +172,16 @@ println("Est. net electrical output: $(round(W_net_elec, digits=1)) kW")
 println("BRU design goal:            10.5 kW")
 println("BRU test result (at 45 psia / 2060°R TIT):  ~13.6 kW (lab loop, low P-loss)")
 println()
+
+# Where the reactor's exergy goes (second-law loss ledger). Dead state = the
+# coldest point of the model (compressor inlet), so the "heat_rejection" line
+# is the exergy the unmodeled cold end throws away.
+println("Exergy loss ledger:")
+display(loss_ledger(sol))
+println()
+eb = energy_balance(sol)
+println("First-law closure: Q_in − P_shaft − Q_rejected = $(round(eb.residual, sigdigits=3)) W")
+println()
 println("\nFluid model note:")
 println("  NPSS BRU3.mdl uses 'CEAT' = live CEA thermodynamics, exactly ideal")
 println("  monatomic He-Xe with M = 83.328 (w_He = 0.0181) — see validation/RESULTS.md.")

@@ -301,10 +301,46 @@ sprint(summary, sol)            # same, captured as a String
 stations(sol; branches=true)    # Vector of "Element.port" => FluidState, flow order
 tsdiagram(sol)                  # Plots.jl recipe: T-s diagram with stations
 mapplot(m); mapplot(comp)       # map speed lines; with operating point if element
+losswaterfall(L)                # Plots.jl recipe: exergy waterfall of a LossLedger (or sol)
 ```
 
 `stations` walks the main loop in physical order (through HX hot sides via
 back-edges), then bleed branches.
+
+### Energy and loss accounting
+
+```julia
+eb = energy_balance(sol)        # first law, all [W]
+L  = loss_ledger(sol; T0)       # second law (exergy) — displays as a waterfall
+losses_by_kind(L)               # [:aero => …, :pressure => …, …], largest first
+ledger_rows(L)                  # (element, kind, W) rows, as printed
+```
+
+`energy_balance` fields: `Q_in` (heat sources with positive duty), `Q_out`
+(radiators, and heat sources with negative duty), `Q_open` (net enthalpy
+carried out by open streams — coolant loops, or the implicit cooler between a
+dangling outlet and the seeded inlet of an open-loop model), `P_shaft`,
+`imbalance` (Σ enthalpy change of adiabatic elements; ≈ 0), `residual`
+(`Q_in − Q_out − Q_open − P_shaft`; ≈ 0), `by_element`.
+
+`LossLedger` fields: `T0`, `Q_in`, `exergy_in` (`(name, W)` per heat source:
+enthalpy rise minus `T0` × the entropy rise of the constant-pressure heating),
+`P_shaft`, `losses::Vector{Loss}`, `closure` (exergy in − `P_shaft` − Σ losses;
+≈ 0 by the Gouy–Stodola identity). `T0` defaults to the coldest available sink:
+min of radiator `T_sink`, boundary-stream inlet temperatures, and the seed
+inlet temperature.
+
+`Loss(element, kind, exergy)` kinds: `:aero` (compressor/turbine
+irreversibility), `:pressure` (total-pressure losses, incl. the pressure-loss
+part of heat sources, radiators and heat exchangers), `:heat_transfer`
+(finite-ΔT exchange), `:mixing`, `:heat_rejection` (exergy leaving with
+radiated or rejected heat, or with open streams — netted per fluid),
+`:imbalance` (numerical energy imbalance of an adiabatic element).
+
+New element types join the accounting by defining `element_inlets(el)`,
+`element_outlets(el)` (default: `el.inlet`/`el.outlet`), `element_role(el)`
+(`:adiabatic`, `:work_in`, `:work_out`, `:heat_in`, `:heat_out`) and, if the
+default single-kind entropy-generation entry is not right, `element_losses(el, T0)`.
 
 ## Unit conversion helpers
 

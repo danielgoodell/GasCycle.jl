@@ -17,6 +17,7 @@ Designed as a clean, extensible reimplementation of the core NPSS cycle-analysis
 - **Transport properties** — μ, k, Pr for all noble gases and binary mixtures, validated against experiment (groundwork for heat-exchanger sizing)
 - **Exact design derivatives** via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) — parametric element types (`Compressor{T<:Real}`, etc.) propagate Dual numbers through the full cycle, including through the Newton solves (implicit function theorem via nested Duals)
 - **Built-in Newton solvers** (no heavy solver dependency) — back-edge states (recuperator, cold-end loop closure) and off-design unknowns (map coordinates, shaft speed) solved together; Newton with backtracking for design, dogleg trust region for off-design, pluggable via `solve!(net; alg=...)`
+- **Energy and loss accounting** — `energy_balance(sol)` (first law) and `loss_ledger(sol)` (exergy destroyed per component, rejected heat, exact closure check), printed and plotted (`losswaterfall`) as a waterfall from reactor exergy to net power
 - **Targets and free variables** — NPSS-style solver pairs (`add_free!`, `add_target!`): e.g. size the mass flow for a net power, or hold shaft speed with reactor outlet temperature; works in design and off-design and stays differentiable
 - **Performance maps** — corrected speed/flow maps with design-point scaling, plus a reader for NPSS `.map` (NEO Table) files
 - **NPSS-style output** — `summary(sol)` prints station/component/cycle tables in physical flow order; `stations(sol)` returns the data; Plots recipes for T-s diagrams and map operating points
@@ -176,7 +177,7 @@ Because the Newton iterates on whatever number type the model carries and builds
 ## Running tests and benchmarks
 
 ```
-julia --project -e 'using Pkg; Pkg.test()'    # ~560 tests
+julia --project -e 'using Pkg; Pkg.test()'    # ~630 tests
 julia benchmarks/runbenchmarks.jl             # BenchmarkTools suite
 ```
 

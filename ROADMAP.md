@@ -82,8 +82,18 @@ Follow-ups:
 - Report free variables/targets in `summary(sol)` (currently only
   `solve!(net; verbose=true)` prints them).
 
-### 2. Loss and energy accounting
-One interface, `losses(el) -> Vector{Loss}`, where each entry has a name, a
+### 2. Loss and energy accounting — DONE 2026-11-19
+Implemented in `src/output/Accounting.jl`: `energy_balance` (first law),
+`loss_ledger` (exergy, Gouy–Stodola closure as a built-in correctness check),
+`losses_by_kind`, a printed waterfall and the `losswaterfall` plot recipe; an
+element interface (`element_inlets/outlets/role/losses`) for new elements.
+Verified exact closure on open/closed loops, ideal and real gas, FPT tables
+(BRU example), mixing, and coolers modeled as negative-duty heat sources.
+Follow-ups: categories for electrical/mechanical losses arrive with item 3
+(they are first-law losses with a heat destination — the ledger will need
+a `heat_to` field then); `summary(sol)` could print the ledger.
+
+Original plan, for reference: one interface, `losses(el) -> Vector{Loss}`, where each entry has a name, a
 category (`:pressure`, `:heat_leak`, `:mechanical`, `:electrical`,
 `:heat_rejection`, `:aero` …), a power-equivalent value [W], and where the
 heat goes (ambient, a fluid stream, a radiator).
@@ -291,8 +301,8 @@ Cp, so monatomic kinetic theory does not apply. Implement a
 - Transport via Sutherland law or polynomial fits per gas.
 - Air as a fixed-composition pseudo-species (standard dry air), N₂ and CO₂
   as pure species.
-- Prerequisite: fix the recuperator's `cp·ΔT` (see backlog) — it is only
-  exact for constant-cp gases.
+- (The recuperator already works in enthalpy — confirmed by the item 2
+  energy-closure tests on real-gas He-Xe — so no HX change is needed.)
 
 ---
 
@@ -334,8 +344,6 @@ continuation pieces can be picked up opportunistically at any point.
   cubic interpolation. Do this only if a table-only fluid enters the model
   (e.g., Oil.fpt / H2O.fpt for a heat-rejection coolant loop, which have no
   closed form to escape to).
-- Recuperator uses `cp·ΔT` instead of enthalpy differences (fine for
-  monatomic He-Xe, approximate in general; must be fixed before item 15).
 - `Splitter`/`Mixer` branch networks: add end-to-end test for the BRU bleed
   configuration (also the natural flow path for a gas-cooled alternator,
   item 3).

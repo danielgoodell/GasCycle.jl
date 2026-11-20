@@ -170,6 +170,33 @@ element whose field is a free variable in the gradient's number type
 (`HeatSource("H"; TtExit = 1100.0 * one(eltype(p)))`) — the error message says
 so if you forget.
 
+## Where the energy goes
+
+`energy_balance(sol)` is the first-law check (heat in = shaft power + heat
+rejected, to solver tolerance). `loss_ledger(sol)` is the second-law view: of
+the exergy the reactor puts into the gas, how much each irreversibility
+destroys and how much the cold end throws away. It prints as a waterfall:
+
+```
+julia> loss_ledger(sol)
+Loss ledger (exergy, dead state T0 = 300.0 K)
+  heat input Q = 34.954 kW
+  + exergy in  Heater                          24.661 kW   100.0 %
+  − Comp  (aero)                                2.441 kW     9.9 %
+  − Recup  (heat_transfer)                      1.765 kW    7.16 %
+  − Recup  (pressure)                           0.589 kW    2.39 %
+  …
+  − Recup.hot_outlet  (heat_rejection)          4.267 kW    17.3 %
+  = net shaft power                            13.119 kW   53.19 %
+  closure residual: 5.82e-11 W
+```
+
+The closure residual is an identity, so anything beyond solver tolerance
+points at a modeling error. The dead state `T0` defaults to the coldest sink
+in the model (radiator sink, coolant inlet, or compressor inlet); pass
+`T0 = …` to change it. Ledger values are differentiable, so a loss can be a
+target or an optimization objective. `losswaterfall(L)` plots it.
+
 ## Bleed flows
 
 Branches use explicit port wiring with `Splitter`/`Mixer`:

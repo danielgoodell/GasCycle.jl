@@ -9,7 +9,7 @@ GasCycle.jl — a Julia package for closed Brayton cycle analysis (He-Xe working
 ## Commands
 
 ```bash
-# Full test suite (~560 tests)
+# Full test suite (~630 tests)
 julia --project -e 'using Pkg; Pkg.test()'
 
 # Single test file (each is standalone: does `using Test; using GasCycle` itself)
@@ -32,6 +32,7 @@ Include-order layering in `src/GasCycle.jl` (single module, no submodules): unit
 - **`core/`** — `FluidState{T<:Real}` (Pt, Tt, W, fluid), `Port` (mutable ref to a state), `AbstractElement`.
 - **`elements/`** — Compressor, Turbine, HeatExchanger, HeatSource, Radiator, Duct, Splitter, Mixer, Shaft. Each has design and (where applicable) off-design/map modes plus the off-design residual interface (`n_residuals`, `residuals`, `indep_vars`, `set_indep_vars!`).
 - **`network/FlowNetwork.jl`** — directed port graph; computes a flow plan; loops (recuperator, cold-end closure) are declared as back-edges.
+- **`output/Accounting.jl`** — `energy_balance` (first law) and `loss_ledger` (exergy; closure residual is an exact identity, so treat a nonzero one as a model bug). New element types plug in via `element_inlets`/`element_outlets`/`element_role`/`element_losses`.
 - **`network/Targets.jl`** — user solver pairs: `add_free!` (element field, seed-state field, or get/set closures) and `add_target!` (any `net -> Real`).
 - **`solver/`** — `Solver.jl` includes `DesignSolve.jl`, `OffDesignSolve.jl`, `ResidualAssembly.jl`, etc. Back-edge `[Tt, Pt]` states are Newton unknowns; `one_pass!` propagates the cycle from seeds; the built-in solvers in `NonlinearSolvers.jl` close the residual. Back-edge-only design solves use `NewtonBacktracking` (ForwardDiff Jacobian). Anything with element unknowns (off-design map line coordinates — compressor `Rline`, turbine `PR` — and shaft speed) or user free variables/targets goes through `_solve_general!` in `OffDesignSolve.jl` (`DoglegTrustRegion`, finite-difference Jacobian). Jacobians are always primal Float64 matrices; derivative parts of Dual-valued unknowns are converged after the primal by `_refine_partials` (implicit function theorem). Dependencies are kept deliberately light (no NonlinearSolve/SciML); heavier backends belong in package extensions behind the `NonlinearBackend` interface.
 

@@ -63,4 +63,20 @@ const RB = GasCycle.RecipesBase
 
     @test_throws Exception RB.apply_recipe(Dict{Symbol,Any}(),
                                            GasCycle.MapPlot((Duct("D"),)))
+
+    # ── Loss waterfall ───────────────────────────────────────────────────────
+    L = loss_ledger(sol)
+    series = RB.apply_recipe(Dict{Symbol,Any}(), GasCycle.LossWaterfall((L,)))
+    @test length(series) == 3                          # input, losses, net power
+    @test all(s -> s.plotattributes[:seriestype] == :shape, series)
+    nrows = length(ledger_rows(L))
+    @test count(isnan, series[2].args[1]) == nrows     # one rectangle per loss row
+    Ex_kW = sum(last, L.exergy_in) / 1e3
+    @test maximum(filter(!isnan, series[1].args[2])) ≈ Ex_kW
+    # The losses step down from the exergy input to the net power.
+    @test minimum(filter(!isnan, series[2].args[2])) ≈ L.P_shaft / 1e3 rtol = 1e-6
+    @test maximum(filter(!isnan, series[3].args[2])) ≈ L.P_shaft / 1e3
+    # Also accepts a SolveResult directly.
+    @test length(RB.apply_recipe(Dict{Symbol,Any}(), GasCycle.LossWaterfall((sol,)))) == 3
+    @test_throws Exception RB.apply_recipe(Dict{Symbol,Any}(), GasCycle.LossWaterfall((42,)))
 end

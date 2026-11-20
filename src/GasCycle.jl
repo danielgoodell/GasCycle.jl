@@ -38,6 +38,7 @@ include("solver/Solver.jl")
 
 # ── Output ────────────────────────────────────────────────────────────────────
 include("output/Summary.jl")
+include("output/Accounting.jl")
 include("output/PlotRecipes.jl")
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -72,7 +73,8 @@ export FlowNetwork, add!, connect!, connect_port!, add_shaft!, add_hx_pair!, set
 export solve!, cycle_efficiency, net_power, SolveResult
 export NonlinearBackend, NewtonBacktracking, DoglegTrustRegion
 export add_free!, add_target!, clear_targets!
+export Loss, LossLedger, energy_balance, loss_ledger, losses_by_kind, ledger_rows
 export stations   # summary(sol) extends Base.summary — no export needed
-export tsdiagram, tsdiagram!, mapplot, mapplot!   # RecipesBase user plots
+export tsdiagram, tsdiagram!, mapplot, mapplot!, losswaterfall, losswaterfall!   # RecipesBase user plots
 
 end # module GasCycle
