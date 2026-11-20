@@ -107,8 +107,29 @@ heat goes (ambient, a fluid stream, a radiator).
   power → alternator → cable → PCU → DC bus, with each loss called out.
 - Build this early: every element added after it reports losses from day one.
 
-### 3. Electrical domain: alternator → cable → power conversion → DC bus
-The shaft currently ends in a scalar `P_load`. Replace that with an
+### 3. Electrical domain: alternator → cable → power conversion → DC bus — DONE 2026-11-20
+Implemented: `Alternator` (gas-cooled, in the gas path; shaft consumer;
+constant-η or copper/core/windage loss model; V ∝ N with resistive drop),
+`Cable` (DC/AC, R from geometry and temperature, exact I²R), `Converter`
+family (`Rectifier`, `DCDCConverter`, `Transformer`, generic
+`PowerConverter`; a + bP + cP² losses), `ElectricalBus`, `ElectricalLoad`,
+`ParasiticLoad` + `add_speed_control!`. Radial tree solved inside each pass
+(voltage down, power up, fixed point for drops); all fields `Real` so
+differentiable and targetable. Energy/exergy accounting carries through to
+delivered DC. Scope decisions (2026-11-20, with the user): power-flow level
+only — no power factor/reactive power/harmonics for now (possible later);
+no real alternator data, so generic loss models; alternator cooled by the
+main gas flow (bleeds are for bearings/magnets/shaft).
+Follow-ups:
+- Alternator/electronics temperatures and limits (magnet and insulation
+  temperature from the cooling gas) — the placement trade (compressor inlet
+  costs ~0.4 pt efficiency vs discharge but runs ~200 K cooler) can't be
+  judged without them.
+- Shaft mechanical losses (bearings, seals) as their own loss terms; today
+  only the alternator's windage term exists.
+- Cable conductor temperature is a parameter, not coupled to a thermal model.
+
+Original plan, for reference: the shaft currently ends in a scalar `P_load`. Replace that with an
 electrical chain whose output is the DC power the mission actually specifies.
 - **Electrical port** carrying power, voltage, and current (DC) or power,
   RMS voltage, frequency, and power factor (AC). Start with power-flow-level

@@ -160,6 +160,55 @@ Shaft(name; N=10000.0, mode=:design, P_load=0.0)
 Added to the network with `add_shaft!`, which broadcasts `N` to the linked
 turbomachines for their corrected-speed lookups.
 
+### Alternator
+
+```julia
+Alternator(name; V_rated, N_rated, poles=2, η=nothing,
+           R_phase=0.0, P_core_rated=0.0, core_exp=1.5, P_windage_rated=0.0, dPqP=0.0)
+```
+
+Shaft-driven PM alternator cooled by the main gas flow: it is a gas-path
+element (`connect!(net, alt => comp => …)`), a shaft consumer
+(`add_shaft!(net, shaft; drives=[comp, alt], driven_by=turb)`) and the root of
+the electrical network. Three-phase AC at unity power factor:
+f = poles·N/120, V_oc = V_rated·N/N_rated, terminal V = V_oc − √3·I·R_phase.
+Losses — constant `η`, or copper 3I²R_phase + core P_core_rated·(f/f_rated)^core_exp
++ windage P_windage_rated·(N/N_rated)³ — all heat the gas passing through.
+Fields after a solve: `P_mech` (shaft power drawn), `e` (`ElecPoint`: `V_out`,
+`f`, `I`, `P_out`, `P_loss`). `shaft_power(el)`, `electrical_frequency(el)`.
+
+### Electrical network
+
+A radial tree from alternators to loads, wired with `connect_electrical!`
+and solved inside every pass (voltages down the tree, power demand up it,
+resistive drops converged by fixed-point iteration). All numeric fields are
+`Real`, so any of them can be a free variable or carry an outer gradient.
+
+```julia
+Cable(name; kind=:dc, R=nothing, length, area, resistivity=1.72e-8, temp_coeff=0.00393, T=293.15)
+Rectifier(name; V_out=nothing, ratio=1.35, η / P_noload / k_lin / k_quad)   # AC→DC (passive bridge by default)
+DCDCConverter(name; V_out, ...)                                           # regulated DC→DC
+Transformer(name; ratio, ...)                                             # AC→AC
+PowerConverter(name; input=:ac, output=:dc, V_out, ...)                   # generic box
+ElectricalBus(name; kind=:dc)                                             # lossless junction, many branches
+ElectricalLoad(name; P, kind=:dc)                                         # useful load [W]
+ParasiticLoad(name; P=0.0, kind=:dc)                                      # PLR (power dumped to space)
+
+connect_electrical!(net, alt => cable => rect => link)    # chains; a bus feeds several branches
+connect_electrical!(net, link => plr)
+add_speed_control!(net, plr, shaft; N)                    # PLR power holds shaft speed (free P ≥ 0, target N)
+electrical_power(sol); parasitic_power(sol)               # Σ useful / parasitic load [W]
+electrical_report(sol)                                    # per-node V, f, I, P_in, P_out, loss
+```
+
+Cable: `R` per conductor; DC loss 2I²R and drop 2IR, AC loss 3I²R and
+line-line drop √3·I·R; the current solves P_out = V_in·I − loss exactly (NaN
+if the line cannot carry the demand). Converter losses:
+`P_loss = P_noload + k_lin·P_out + k_quad·P_out²`; `η` sets `k_lin = 1/η − 1`.
+Each node's operating point is in `node.e` (`V_in`, `V_out`, `f`, `I`, `P_in`,
+`P_out`, `P_loss`). Connections must match kinds (`:ac`/`:dc`); each node is
+fed once.
+
 ### Element queries
 
 | Function | Meaning |
@@ -319,14 +368,19 @@ ledger_rows(L)                  # (element, kind, W) rows, as printed
 `energy_balance` fields: `Q_in` (heat sources with positive duty), `Q_out`
 (radiators, and heat sources with negative duty), `Q_open` (net enthalpy
 carried out by open streams — coolant loops, or the implicit cooler between a
-dangling outlet and the seeded inlet of an open-loop model), `P_shaft`,
-`imbalance` (Σ enthalpy change of adiabatic elements; ≈ 0), `residual`
-(`Q_in − Q_out − Q_open − P_shaft`; ≈ 0), `by_element`.
+dangling outlet and the seeded inlet of an open-loop model), `P_shaft`
+(turbines − compressors), `P_alternator` (shaft power into alternators),
+`shaft_surplus` (`P_shaft − P_alternator`), `P_electric`, `P_delivered`,
+`P_parasitic`, `P_elec_losses`, `imbalance` (Σ enthalpy change of adiabatic
+elements; ≈ 0), `residual` (`Q_in − Q_out − Q_open − shaft_surplus −
+P_delivered − P_parasitic − P_elec_losses`; ≈ 0), `by_element`.
 
 `LossLedger` fields: `T0`, `Q_in`, `exergy_in` (`(name, W)` per heat source:
 enthalpy rise minus `T0` × the entropy rise of the constant-pressure heating),
-`P_shaft`, `losses::Vector{Loss}`, `closure` (exergy in − `P_shaft` − Σ losses;
-≈ 0 by the Gouy–Stodola identity). `T0` defaults to the coldest available sink:
+`P_shaft`, `P_delivered`, `P_out` (net useful output: delivered electricity
+plus any unbalanced shaft surplus; `P_shaft` without an electrical network),
+`losses::Vector{Loss}`, `closure` (exergy in − `P_out` − Σ losses; ≈ 0 by the
+Gouy–Stodola identity), `electrical`. `T0` defaults to the coldest available sink:
 min of radiator `T_sink`, boundary-stream inlet temperatures, and the seed
 inlet temperature.
 
@@ -335,6 +389,8 @@ irreversibility), `:pressure` (total-pressure losses, incl. the pressure-loss
 part of heat sources, radiators and heat exchangers), `:heat_transfer`
 (finite-ΔT exchange), `:mixing`, `:heat_rejection` (exergy leaving with
 radiated or rejected heat, or with open streams — netted per fluid),
+`:electrical` (alternator: the part of its loss heat not recovered by the gas;
+cables and converters: the whole loss), `:parasitic` (PLR power),
 `:imbalance` (numerical energy imbalance of an adiabatic element).
 
 New element types join the accounting by defining `element_inlets(el)`,

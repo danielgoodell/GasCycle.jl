@@ -76,11 +76,13 @@ mutable struct FlowNetwork
     plan::Union{_FlowPlan,Nothing}
     free_vars::Vector{FreeVar}
     targets::Vector{Target}
+    electrical::Vector{Any}            # electrical nodes (incl. Alternators)
+    e_edges::Vector{Tuple{Int,Int}}    # (src, dst) indices into `electrical`
 end
 
 FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing,
                             Tuple{Int,Symbol,FluidState}[], nothing,
-                            FreeVar[], Target[])
+                            FreeVar[], Target[], Any[], Tuple{Int,Int}[])
 
 _invalidate_plan!(net::FlowNetwork) = (net.plan = nothing)
 
@@ -394,6 +396,13 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
 
     plan = _flow_plan!(net)
     avail = _AvailMap()
+
+    # Electrical side first: it sets the alternators' losses (which heat the
+    # gas) and shaft loads. It depends on shaft speed only.
+    for sh in net.shafts
+        _broadcast_speed!(sh)
+    end
+    _solve_electrical!(net)
 
     # Seed the initial element's inlet
     _store_available!(avail, net, net.seed_el, :inlet, Port(net.seed_state))

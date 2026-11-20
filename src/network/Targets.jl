@@ -36,7 +36,7 @@ end
 
 Declare element field `el.field` as a free variable: the solver varies it to
 satisfy the targets declared with [`add_target!`](@ref). `el` may be any element
-in the network or a `Shaft` added with `add_shaft!`.
+in the network, a `Shaft` added with `add_shaft!`, or an electrical node.
 
     add_free!(net, field; ...)          # seed-state field: :W, :Tt or :Pt
     add_free!(net, name; get, set!, ...) # anything else, via accessor closures
@@ -52,11 +52,12 @@ itself (e.g. `HeatSource.Q` in `:fixed_TtExit` mode) are not meaningful free
 variables. When a gradient flows through the solve, a concretely typed field
 must already hold the gradient's number type (see the error message).
 """
-function add_free!(net::FlowNetwork, el::AbstractElement, field::Symbol;
+function add_free!(net::FlowNetwork, el::Union{AbstractElement,AbstractElectrical}, field::Symbol;
                    name::AbstractString = "$(el.name).$field",
                    ref::Real = NaN, lower::Real = -Inf, upper::Real = Inf)
-    (any(e -> e === el, net.elements) || any(s -> s === el, net.shafts)) ||
-        error("add_free!: element \"$(el.name)\" is not in the network — call add! / add_shaft! first")
+    (any(e -> e === el, net.elements) || any(s -> s === el, net.shafts) ||
+     any(e -> e === el, net.electrical)) ||
+        error("add_free!: element \"$(el.name)\" is not in the network — call add! / add_shaft! / connect_electrical! first")
     hasfield(typeof(el), field) ||
         error("add_free!: $(nameof(typeof(el))) \"$(el.name)\" has no field `$field`")
     getfield(el, field) isa Real ||

@@ -46,3 +46,9 @@ function cycle_efficiency(net::FlowNetwork)
     Q_in ≈ 0.0 && return 0.0
     net_power(net) / Q_in
 end
+
+# SolveResult forms of the electrical queries (network/ElectricalNetwork.jl).
+electrical_power(r::SolveResult) = electrical_power(r.net)
+parasitic_power(r::SolveResult)  = parasitic_power(r.net)
+electrical_report(r::SolveResult) = electrical_report(stdout, r.net)
+electrical_report(io::IO, r::SolveResult) = electrical_report(io, r.net)

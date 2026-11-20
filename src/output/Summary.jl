@@ -194,9 +194,14 @@ function _describe(el::Radiator)
              _scalar(Q_rejected(el)) / 1e3)
 end
 
+_describe(el::Alternator) =
+    @sprintf("P_shaft=%.2f kW  P_elec=%.2f kW  loss=%.3f kW  f=%.0f Hz  V=%.1f V",
+             _scalar(el.P_mech) / 1e3, _scalar(el.e.P_out) / 1e3, _scalar(el.e.P_loss) / 1e3,
+             _scalar(el.e.f), _scalar(el.e.V_out))
+
 _describe(sh::Shaft) = begin
-    str = @sprintf("N=%.0f rpm  balance=%.2f kW", sh.N, _scalar(power_balance(sh)) / 1e3)
-    sh.P_load == 0.0 || (str *= @sprintf("  P_load=%.2f kW", sh.P_load / 1e3))
+    str = @sprintf("N=%.0f rpm  balance=%.2f kW", _scalar(sh.N), _scalar(power_balance(sh)) / 1e3)
+    sh.P_load == 0.0 || (str *= @sprintf("  P_load=%.2f kW", _scalar(sh.P_load) / 1e3))
     str
 end
 
@@ -232,6 +237,12 @@ function Base.summary(io::IO, r::SolveResult)
     @printf(io, "  Net shaft power:  %10.2f kW\n", P_net / 1e3)
     η == 0.0 || @printf(io, "  Heat input:       %10.2f kW\n", P_net / η / 1e3)
     η == 0.0 || @printf(io, "  Cycle efficiency: %10.2f %%\n", η * 100)
+    if !isempty(r.net.electrical)
+        P_del = _scalar(electrical_power(r.net))
+        @printf(io, "  Electric delivered: %9.2f kW\n", P_del / 1e3)
+        @printf(io, "  Parasitic load:     %9.2f kW\n", _scalar(parasitic_power(r.net)) / 1e3)
+        η == 0.0 || @printf(io, "  Electric efficiency:%9.2f %%\n", P_del / (P_net / η) * 100)
+    end
     nothing
 end
 

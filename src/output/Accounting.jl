@@ -28,7 +28,9 @@ One entry of the loss ledger: `exergy` [W] destroyed (T0·S_gen) or rejected at
 `element`. `kind` is one of `:aero` (turbomachinery irreversibility),
 `:pressure` (total-pressure loss), `:heat_transfer` (finite-ΔT heat exchange),
 `:mixing`, `:heat_rejection` (exergy leaving with rejected heat or an open
-stream), `:imbalance` (numerical energy imbalance of an element).
+stream), `:electrical` (alternator, cable and converter losses),
+`:parasitic` (power dumped in parasitic loads), `:imbalance` (numerical
+energy imbalance of an element).
 """
 struct Loss
     element::String
@@ -52,6 +54,7 @@ element_role(::Compressor)      = :work_in
 element_role(::Turbine)         = :work_out
 element_role(::HeatSource)      = :heat_in
 element_role(::Radiator)        = :heat_out
+element_role(::Alternator)      = :alternator   # shaft in, electricity out, loss heats the gas
 
 loss_kind(::AbstractElement) = :pressure
 loss_kind(::Compressor)      = :aero
@@ -99,6 +102,19 @@ function element_losses(el::HeatExchanger, T0)
     [Loss(el.name, :heat_transfer, T0 * (S_gen - dSp)),
      Loss(el.name, :pressure, T0 * dSp)]
 end
+
+# Alternator: the loss heats the gas; the entropy that generates is the
+# destroyed exergy (the rest re-enters the cycle as gas exergy).
+function element_losses(el::Alternator, T0)
+    dSp = _dS_pressure(el.inlet, el.outlet)
+    S_gen = _S(el.outlet) - _S(el.inlet)
+    [Loss(el.name, :electrical, T0 * (S_gen - dSp)),
+     Loss(el.name, :pressure, T0 * dSp)]
+end
+
+# Electrical side: per node (P_in, P_loss) bookkeeping.
+_elec_losses(net) = sum(el -> el.e.P_loss,
+    (el for el in net.electrical if !(el isa Alternator) && !(el isa ElectricalLoad)); init = 0.0)
 
 # Exergy supplied to the fluid by a heat source: enthalpy rise minus T0 times
 # the entropy rise of the constant-pressure heating part.
@@ -181,15 +197,22 @@ First-law accounting of a solved network [W]:
 - `Q_open`      — net enthalpy carried out by open streams (coolant loops,
                   or the implicit cooler of an open-loop model)
 - `P_shaft`     — net shaft power (turbines − compressors)
+- `P_alternator`— shaft power drawn by alternators
+- `shaft_surplus` — `P_shaft − P_alternator` (≈ 0 on balanced shafts that
+                  drive alternators; equals `P_shaft` without alternators)
+- `P_electric`  — alternator electrical output
+- `P_delivered`, `P_parasitic`, `P_elec_losses` — where it goes: useful
+                  loads, parasitic loads, cables and converters
 - `imbalance`   — Σ enthalpy imbalance of adiabatic elements (should be ≈ 0)
-- `residual`    — `Q_in − Q_out − Q_open − P_shaft` (≈ 0; equals `imbalance`)
+- `residual`    — `Q_in − Q_out − Q_open − shaft_surplus − P_delivered −
+                  P_parasitic − P_elec_losses` (≈ 0; equals `imbalance`)
 - `by_element`  — `(name, role, value)` per element (heat/work [W], or the
                   imbalance for adiabatic elements)
 """
 energy_balance(r::SolveResult) = energy_balance(r.net)
 
 function energy_balance(net::FlowNetwork)
-    Q_in = Q_out = W_in = W_out = imb = 0.0
+    Q_in = Q_out = W_in = W_out = imb = P_alt = P_el = 0.0
     by_el = Tuple{String,Symbol,Real}[]
     for el in net.elements
         dH = _Hsum(element_outlets(el)) - _Hsum(element_inlets(el))
@@ -202,17 +225,28 @@ function energy_balance(net::FlowNetwork)
             W_in += dH
         elseif role === :work_out
             W_out -= dH
+        elseif role === :alternator
+            P_alt += el.P_mech
+            P_el  += el.e.P_out
+            imb   += dH - (el.P_mech - el.e.P_out)
         else
             imb += dH
         end
-        push!(by_el, (el.name, role, role in (:heat_out, :work_out) ? -dH : dH))
+        push!(by_el, (el.name, role, role in (:heat_out, :work_out) ? -dH :
+                                     role === :alternator ? el.P_mech : dH))
     end
     os = _open_streams(net)
     Q_open = sum(p -> _H(p[2]), os.exits; init = 0.0) -
              sum(p -> _H(p[2]), os.entrances; init = 0.0)
     P = W_out - W_in
+    surplus = P - P_alt
+    P_del, P_par, P_eloss = electrical_power(net), parasitic_power(net), _elec_losses(net)
     (Q_in = Q_in, Q_out = Q_out, Q_open = Q_open, P_shaft = P,
-     imbalance = imb, residual = Q_in - Q_out - Q_open - P, by_element = by_el)
+     P_alternator = P_alt, shaft_surplus = surplus, P_electric = P_el,
+     P_delivered = P_del, P_parasitic = P_par, P_elec_losses = P_eloss,
+     imbalance = imb,
+     residual = Q_in - Q_out - Q_open - surplus - P_del - P_par - P_eloss,
+     by_element = by_el)
 end
 
 # ── Second law ───────────────────────────────────────────────────────────────
@@ -221,16 +255,23 @@ end
     LossLedger
 
 Result of [`loss_ledger`](@ref). Fields: `T0` (dead state [K]), `exergy_in`
-(`(name, value)` per heat source [W]), `Q_in` [W], `P_shaft` [W], `losses`
-(`Vector{Loss}`), `closure` (exergy in − P_shaft − Σ losses; ≈ 0).
+(`(name, value)` per heat source [W]), `Q_in` [W], `P_shaft` [W] (turbines −
+compressors), `P_delivered` [W] (useful electrical loads), `P_out` [W] (net
+useful output: delivered electricity plus any unbalanced shaft surplus; equals
+`P_shaft` without an electrical network), `losses` (`Vector{Loss}`),
+`closure` (exergy in − P_out − Σ losses; ≈ 0), `electrical` (whether the
+model has an electrical network).
 """
 struct LossLedger
     T0::Real
     Q_in::Real
     exergy_in::Vector{Tuple{String,Real}}
     P_shaft::Real
+    P_delivered::Real
+    P_out::Real
     losses::Vector{Loss}
     closure::Real
+    electrical::Bool
 end
 
 """
@@ -259,8 +300,10 @@ end
 
 Second-law (exergy) accounting of a solved network relative to dead state
 `T0` [K]. The exergy the heat sources add to the working fluid equals the net
-shaft power plus every loss in the ledger — destroyed (T0·S_gen of each
-irreversibility) or rejected (radiators, coolant and other open streams).
+useful output (net shaft power, or delivered electrical power when the model
+has an electrical network) plus every loss in the ledger — destroyed (T0·S_gen
+of each irreversibility, alternator/cable/converter losses, parasitic loads)
+or rejected (radiators, coolant and other open streams).
 `closure` is the residual of that identity and should be ≈ 0.
 
 Displaying the ledger prints the waterfall from exergy input to net power,
@@ -272,7 +315,7 @@ function loss_ledger(net::FlowNetwork; T0::Real = default_dead_state(net))
     losses = Loss[]
     ex_in = Tuple{String,Real}[]
     Q_in = 0.0
-    W_in = W_out = 0.0
+    W_in = W_out = P_alt = 0.0
     for el in net.elements
         dH = _Hsum(element_outlets(el)) - _Hsum(element_inlets(el))
         role = _heat_role(el, dH)
@@ -285,6 +328,10 @@ function loss_ledger(net::FlowNetwork; T0::Real = default_dead_state(net))
             W_in += dH
         elseif role === :work_out
             W_out -= dH
+        elseif role === :alternator
+            P_alt += el.P_mech
+            imb = dH - (el.P_mech - el.e.P_out)
+            abs(_primal(imb)) > 0 && push!(losses, Loss(el.name, :imbalance, -imb))
         elseif role === :adiabatic && abs(_primal(dH)) > 0
             # Energy an adiabatic element creates/destroys is a model error,
             # but it must be booked for the exergy identity to close.
@@ -303,10 +350,22 @@ function loss_ledger(net::FlowNetwork; T0::Real = default_dead_state(net))
         label = isempty(outs) ? join(first.(ins), ", ") : join(first.(outs), ", ")
         push!(losses, Loss(label, :heat_rejection, ex))
     end
+    # Electrical side: conversion losses and parasitic loads are destroyed
+    # exergy (dissipated as heat to the surroundings).
+    for el in net.electrical
+        el isa Alternator && continue
+        if el isa ElectricalLoad
+            el.parasitic && push!(losses, Loss(el.name, :parasitic, el.e.P_in))
+        else
+            push!(losses, Loss(el.name, :electrical, el.e.P_loss))
+        end
+    end
     P = W_out - W_in
+    P_del = electrical_power(net)
+    P_out = P - P_alt + P_del
     Ex = sum(last, ex_in; init = 0.0)
-    closure = Ex - P - sum(l -> l.exergy, losses; init = 0.0)
-    LossLedger(T0, Q_in, ex_in, P, losses, closure)
+    closure = Ex - P_out - sum(l -> l.exergy, losses; init = 0.0)
+    LossLedger(T0, Q_in, ex_in, P, P_del, P_out, losses, closure, !isempty(net.electrical))
 end
 
 """
@@ -349,10 +408,17 @@ function Base.show(io::IO, ::MIME"text/plain", L::LossLedger)
     for (el, kind, ex) in ledger_rows(L)
         println(io, "  ", rpad("− $el  ($kind)", 40), kW(ex), " kW", pct(ex))
     end
-    println(io, "  ", rpad("= net shaft power", 40), kW(L.P_shaft), " kW", pct(L.P_shaft))
+    if L.electrical
+        surplus = L.P_out - L.P_delivered
+        abs(_primal(surplus)) >= 1e-6 * max(1.0, abs(_primal(Ex))) &&
+            println(io, "  ", rpad("  (unbalanced shaft surplus)", 40), kW(surplus), " kW", pct(surplus))
+        println(io, "  ", rpad("= net output (delivered electric)", 40), kW(L.P_out), " kW", pct(L.P_out))
+    else
+        println(io, "  ", rpad("= net shaft power", 40), kW(L.P_out), " kW", pct(L.P_out))
+    end
     print(io, "  closure residual: ", round(_primal(L.closure), sigdigits = 3), " W")
 end
 
 Base.show(io::IO, L::LossLedger) =
     print(io, "LossLedger(T0=$(round(_primal(L.T0), digits=2)) K, $(length(L.losses)) losses, ",
-          "P_shaft=$(round(_primal(L.P_shaft)/1e3, digits=3)) kW)")
+          "P_out=$(round(_primal(L.P_out)/1e3, digits=3)) kW)")

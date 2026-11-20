@@ -54,8 +54,8 @@ n_residuals(el::Shaft) = el.mode == :off_design ? 1 : 0
 function residuals(el::Shaft)
     el.mode == :off_design || return Float64[]
     _broadcast_speed!(el)
-    W_prod  = sum(specific_work(t) * t.inlet[].W for t in el.producers; init=0.0)
-    W_cons  = sum(specific_work(c) * c.inlet[].W for c in el.consumers; init=0.0)
+    W_prod  = sum(shaft_power, el.producers; init=0.0)
+    W_cons  = sum(shaft_power, el.consumers; init=0.0)
     W_scale = max(abs(W_prod), abs(W_cons), 1.0)
     [(W_prod - W_cons - el.P_load) / W_scale]
 end
@@ -69,13 +69,22 @@ function set_indep_vars!(el::Shaft, x::AbstractVector)
 end
 
 """
-    power_balance(shaft) -> Float64
+    power_balance(shaft) -> Real
 
-Net shaft power [W] = turbine work - compressor work.
-Positive value goes to the generator in a closed power cycle.
+Shaft power surplus [W] = turbine power − power drawn by compressors and
+alternators. Without an `Alternator` on the shaft this is the net power
+available to a generator; with one it is ≈ 0 once the shaft is balanced.
 """
 function power_balance(shaft::Shaft)
-    W_prod = sum(specific_work(t) * t.inlet[].W for t in shaft.producers; init=0.0)
-    W_cons = sum(specific_work(c) * c.inlet[].W for c in shaft.consumers; init=0.0)
+    W_prod = sum(shaft_power, shaft.producers; init=0.0)
+    W_cons = sum(shaft_power, shaft.consumers; init=0.0)
     W_prod - W_cons
 end
+
+"""
+    shaft_power(el) -> Real
+
+Power [W] an element exchanges with its shaft: delivered by a turbine, drawn
+by a compressor or alternator (both reported positive).
+"""
+shaft_power(el::Union{Compressor,Turbine}) = specific_work(el) * el.inlet[].W

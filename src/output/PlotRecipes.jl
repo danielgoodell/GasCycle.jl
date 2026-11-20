@@ -127,7 +127,8 @@ end
 
     Ex   = _primal(sum(last, L.exergy_in; init = 0.0)) / 1e3
     rows = ledger_rows(L)
-    labels = ["exergy in"; ["$(r[1]) ($(r[2]))" for r in rows]; "net power"]
+    labels = ["exergy in"; ["$(r[1]) ($(r[2]))" for r in rows];
+              L.electrical ? "net electric" : "net power"]
     n = length(labels)
 
     # Running level: each loss bar hangs from the level left by the previous one.
@@ -158,6 +159,6 @@ end
     @series begin
         seriestype := :shape
         fillcolor  --> :seagreen
-        _rects([n], [0.0], [_primal(L.P_shaft) / 1e3])
+        _rects([n], [0.0], [_primal(L.P_out) / 1e3])
     end
 end

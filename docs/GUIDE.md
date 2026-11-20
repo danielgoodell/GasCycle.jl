@@ -170,6 +170,48 @@ element whose field is a free variable in the gradient's number type
 (`HeatSource("H"; TtExit = 1100.0 * one(eltype(p)))`) — the error message says
 so if you forget.
 
+## From shaft to DC bus: the electrical network
+
+The shaft drives an `Alternator`, cooled by the main gas flow — put it in the
+gas path at the compressor inlet, the coldest gas in the loop. Its losses heat
+the gas there. From the alternator, power flows through an electrical network
+you wire like the fluid one:
+
+```julia
+alt  = Alternator("Alt"; V_rated=400.0, N_rated=36000.0, poles=4,
+                  R_phase=0.02, P_core_rated=300.0, P_windage_rated=200.0)
+connect!(net, alt => comp => recup => heater => turb => alt)
+add_shaft!(net, shaft; drives=[comp, alt], driven_by=turb)
+set_state!(net, alt; Pt=500e3, Tt=400.0, W=1.0, fluid=fluid)
+
+feeder = Cable("Feeder"; kind=:ac, length=20.0, area=10e-6)
+rect   = Rectifier("Rect"; η=0.97)
+link   = ElectricalBus("DCLink")
+plr    = ParasiticLoad("PLR")
+dcdc   = DCDCConverter("DCDC"; V_out=120.0, η=0.95, P_noload=50.0)
+user   = ElectricalLoad("User"; P=15e3)
+connect_electrical!(net, alt => feeder => rect => link)
+connect_electrical!(net, link => plr)
+connect_electrical!(net, link => dcdc => user)
+```
+
+Model as much or as little of the power conversion as you know: a
+transformer–cable–transformer–rectifier chain, or one
+`PowerConverter("PCU"; V_out=120.0, η=0.92)` box.
+
+**Design**: size the cycle for the load, e.g. let the mass flow balance the
+shaft — `add_free!(net, :W)`, `add_target!(net, n -> power_balance(shaft), 0.0; scale=1e3)`.
+
+**Off-design with PLR speed control**: with an off-design shaft (speed is an
+unknown), `add_speed_control!(net, plr, shaft; N=36000.0)` makes the solver set
+the PLR power so the shaft holds speed — load changes are absorbed by the PLR
+exactly as on a real unit. A demand above what the unit can make drives the
+PLR to zero and the solve reports failure.
+
+`electrical_report(sol)` tabulates the network; `summary(sol)` adds delivered
+and parasitic power; the loss ledger carries the chain through to
+"net output (delivered electric)".
+
 ## Where the energy goes
 
 `energy_balance(sol)` is the first-law check (heat in = shaft power + heat

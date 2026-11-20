@@ -25,6 +25,8 @@ include("elements/Compressor.jl")
 include("elements/Turbine.jl")
 include("elements/Duct.jl")
 include("elements/Shaft.jl")
+include("elements/Electrical.jl")
+include("elements/Alternator.jl")
 include("elements/HeatSource.jl")
 include("elements/Radiator.jl")
 include("elements/HeatExchanger.jl")
@@ -34,6 +36,7 @@ include("elements/Mixer.jl")
 # ── Network & Solver ──────────────────────────────────────────────────────────
 include("network/FlowNetwork.jl")
 include("network/Targets.jl")
+include("network/ElectricalNetwork.jl")
 include("solver/Solver.jl")
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -73,6 +76,10 @@ export FlowNetwork, add!, connect!, connect_port!, add_shaft!, add_hx_pair!, set
 export solve!, cycle_efficiency, net_power, SolveResult
 export NonlinearBackend, NewtonBacktracking, DoglegTrustRegion
 export add_free!, add_target!, clear_targets!
+export Alternator, Cable, Converter, Rectifier, DCDCConverter, Transformer, PowerConverter
+export ElectricalBus, ElectricalLoad, ParasiticLoad, ElecPoint, AbstractElectrical
+export connect_electrical!, add_speed_control!, electrical_power, parasitic_power
+export electrical_report, electrical_frequency, shaft_power
 export Loss, LossLedger, energy_balance, loss_ledger, losses_by_kind, ledger_rows
 export stations   # summary(sol) extends Base.summary — no export needed
 export tsdiagram, tsdiagram!, mapplot, mapplot!, losswaterfall, losswaterfall!   # RecipesBase user plots
