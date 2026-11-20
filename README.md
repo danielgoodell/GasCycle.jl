@@ -16,7 +16,7 @@ Designed as a clean, extensible reimplementation of the core NPSS cycle-analysis
 - **Four fluid property backends** (see table below) — including a direct analytic noble-gas backend that needs no property table at all
 - **Transport properties** — μ, k, Pr for all noble gases and binary mixtures, validated against experiment (groundwork for heat-exchanger sizing)
 - **Exact design derivatives** via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) — parametric element types (`Compressor{T<:Real}`, etc.) propagate Dual numbers through the full cycle, including through the Newton solves (implicit function theorem via nested Duals)
-- **Newton solver** via [NonlinearSolve.jl](https://github.com/SciML/NonlinearSolve.jl) — back-edge states (recuperator, cold-end loop closure) and off-design unknowns (map coordinates, shaft speed) solved together
+- **Built-in Newton solvers** (no heavy solver dependency) — back-edge states (recuperator, cold-end loop closure) and off-design unknowns (map coordinates, shaft speed) solved together; Newton with backtracking for design, dogleg trust region for off-design, pluggable via `solve!(net; alg=...)`
 - **Performance maps** — corrected speed/flow maps with design-point scaling, plus a reader for NPSS `.map` (NEO Table) files
 - **NPSS-style output** — `summary(sol)` prints station/component/cycle tables in physical flow order; `stations(sol)` returns the data; Plots recipes for T-s diagrams and map operating points
 - **Benchmark suite** — `benchmarks/runbenchmarks.jl`, including a three-backend comparison on an identical model
@@ -136,7 +136,8 @@ src/
 ├── network/
 │   └── FlowNetwork.jl       # directed port graph; flow plan; back-edges; boundaries
 ├── solver/
-│   └── Solver.jl            # back-edge + off-design Newton (NonlinearSolve)
+│   ├── Solver.jl            # solve!: back-edge + off-design Newton
+│   └── NonlinearSolvers.jl  # built-in Newton / dogleg trust-region backends
 └── output/
     ├── Summary.jl           # summary(sol) station/component tables; stations(sol)
     └── PlotRecipes.jl       # tsdiagram, mapplot (Plots.jl recipes)
@@ -149,11 +150,11 @@ The recuperator creates a circular dependency: the hot-side inlet depends on the
 1. The back-edge `[Tt, Pt]` states are explicit unknowns.
 2. `one_pass!(net, z)` propagates the full cycle given back-edge seeds `z`.
 3. The residual is `F(z) = [Tt_computed − z_Tt, Pt_computed − z_Pt]` (normalised).
-4. NonlinearSolve.jl Newton with `AutoForwardDiff()` Jacobian converges in 1–3 iterations.
+4. Newton (`NewtonBacktracking`, ForwardDiff Jacobian) converges in 1–3 iterations.
 
-In off-design mode the map coordinates of each turbomachine (flow-continuity residual onto the map) and the shaft speed (power-balance residual) join the same Newton vector, with TrustRegion for robustness across map-cell kinks.
+In off-design mode the map coordinates of each turbomachine (flow-continuity residual onto the map) and the shaft speed (power-balance residual) join the same Newton vector, with a dogleg trust region (`DoglegTrustRegion`, finite-difference Jacobian) for robustness across map-cell kinks.
 
-Because the Newton uses `AutoForwardDiff()` internally, an outer `ForwardDiff.gradient` call threads through correctly via nested (differently-tagged) Dual numbers — the back-edge sensitivities are handled by the implicit function theorem at no extra cost.
+Because the Newton iterates on whatever number type the model carries and builds its Jacobian with ForwardDiff, an outer `ForwardDiff.gradient` call threads through correctly via nested (differently-tagged) Dual numbers; a final Newton step from the converged point makes the back-edge sensitivities equal the implicit-function-theorem result.
 
 ## Elements reference
 
@@ -184,7 +185,6 @@ Tests cover thermodynamics and transport (with literature oracles), individual e
 
 | Package | Role |
 |---|---|
-| `NonlinearSolve.jl` | Newton solver for back-edge states and off-design unknowns |
 | `ForwardDiff.jl` | Automatic differentiation through the full cycle |
 | `Interpolations.jl` | B-spline interpolation of FPT property tables |
 | `RecipesBase.jl` | Plots.jl recipes without a hard Plots dependency |

@@ -62,7 +62,7 @@ Build the initial guess for the back-edge Newton.
 Returns [Tt₁, Pt₁, Tt₂, Pt₂, …] from stored element outlet states,
 falling back to seed_state when no outlet is stored yet.
 The returned vector has a concrete element type (Float64 or Dual) inferred
-from the outlet states — NonlinearSolve requires a concrete-typed u0.
+from the outlet states — the Newton solvers and ForwardDiff need a concrete-typed u0.
 """
 function _back_edge_z0(net::FlowNetwork, back_edges)
     # Collect pairs [Tt, Pt] per back-edge; vcat infers the concrete element type.

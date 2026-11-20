@@ -2,14 +2,16 @@
 
 function _solve_offdesign!(net::FlowNetwork, x0::AbstractVector, slices,
                            n_x::Int, n_res::Int, back_edges, n_be::Int;
-                           tol::Float64, maxiter::Int, verbose::Bool)
+                           tol::Float64, maxiter::Int, verbose::Bool,
+                           alg::NonlinearBackend = DoglegTrustRegion())
     # Unknown vector u = [element/shaft indeps; back-edge (Tt, Pt) pairs].
     # The solve runs in normalized unknowns v = u ./ uref so map coordinates,
     # shaft speeds, and thermodynamic states have similarly scaled columns.
     u0   = vcat(x0, _back_edge_z0(net, back_edges))
     uref = [abs(u) > 0 ? abs(u) : 1.0 for u in u0]
 
-    function od_residual!(F, v, _p)
+    function od_residual(v)
+        F = zeros(eltype(v), length(v))
         u = v .* uref
         _scatter_indeps!(net, view(u, 1:n_x), slices)
         z = view(u, n_x+1:length(u))
@@ -26,21 +28,16 @@ function _solve_offdesign!(net::FlowNetwork, x0::AbstractVector, slices,
                 F[n_res + 2i]     = (src_out[].Pt - z[2i])   / z[2i]
             end
         end
-        nothing
+        F
     end
 
     # TrustRegion rather than plain Newton for robustness far from the
     # solution (map slope kinks at grid lines make undamped steps unreliable).
-    prob = NonlinearProblem(od_residual!, u0 ./ uref, nothing)
-    nls  = NonlinearSolve.solve(prob,
-               TrustRegion(autodiff = AutoFiniteDiff());
-               abstol   = tol,
-               reltol   = tol,
-               maxiters = maxiter)
+    nls  = nlsolve(alg, od_residual, u0 ./ uref; tol = tol, maxiters = maxiter)
 
     rn        = norm(nls.resid)
-    converged = rn < tol
-    iters     = nls.stats.nsteps
+    converged = nls.converged
+    iters     = nls.nsteps
 
     u_final = nls.u .* uref
     _scatter_indeps!(net, view(u_final, 1:n_x), slices)

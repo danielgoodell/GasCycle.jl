@@ -361,7 +361,7 @@ Propagate thermodynamic state through all elements once, in topological order.
 If `back_edge_seeds` is provided, it must be a flat vector of alternating
 [Tt₁, Pt₁, Tt₂, Pt₂, …] for each back-edge (in the order they appear in
 `net.edges`). This replaces the stored-outlet seeding used by fixed-point
-iteration and allows the NonlinearSolve.jl Newton to differentiate through
+iteration and allows the Newton solve to differentiate through
 the pass — including when seeds carry ForwardDiff Dual numbers.
 
 Without `back_edge_seeds`, falls back to seeding from the source element's
@@ -393,7 +393,7 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
             # branch networks whose back-edge flow differs from seed_state.W
             # keep the correct heat-capacity rate.  The mass-flow value is
             # stripped back to seed_state.W's numeric type to avoid carrying
-            # temporary inner-Dual values cached by NonlinearSolve's Jacobian
+            # temporary inner-Dual values left by the ForwardDiff Jacobian
             # evaluations into the next primal residual call.
             Tt_s = back_edge_seeds[2*be_idx - 1]
             Pt_s = back_edge_seeds[2*be_idx]

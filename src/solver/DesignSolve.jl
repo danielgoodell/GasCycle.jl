@@ -1,7 +1,8 @@
 # ── Design-mode solve ────────────────────────────────────────────────────────
 
 function _solve_design!(net::FlowNetwork, back_edges;
-                        tol::Float64, maxiter::Int, verbose::Bool)
+                        tol::Float64, maxiter::Int, verbose::Bool,
+                        alg::NonlinearBackend = NewtonBacktracking())
     if isempty(back_edges)
         # No circular dependencies — the initial one_pass! is the solution.
         return SolveResult(net, :success, 1, 0.0)
@@ -13,7 +14,7 @@ function _solve_design!(net::FlowNetwork, back_edges;
     #
     # OUT-OF-PLACE form avoids the nested-Dual pre-allocation conflict when an
     # outer ForwardDiff pass wraps solve!.
-    function be_residual(z, _p)
+    function be_residual(z)
         one_pass!(net, z)
         F = similar(z, 2 * length(back_edges))
         for (i, edge) in enumerate(back_edges)
@@ -30,16 +31,11 @@ function _solve_design!(net::FlowNetwork, back_edges;
     end
 
     z0   = _back_edge_z0(net, back_edges)
-    prob = NonlinearProblem(be_residual, z0, nothing)
-    nls  = NonlinearSolve.solve(prob,
-               NewtonRaphson(autodiff = AutoForwardDiff());
-               abstol   = tol,
-               reltol   = tol,
-               maxiters = maxiter)
+    nls  = nlsolve(alg, be_residual, z0; tol = tol, maxiters = maxiter)
 
     rn        = norm(nls.resid)
-    converged = rn < tol
-    iters     = nls.stats.nsteps
+    converged = nls.converged
+    iters     = nls.nsteps
 
     # Final pass with converged back-edge states to restore all element fields.
     one_pass!(net, nls.u)

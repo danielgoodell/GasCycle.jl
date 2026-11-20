@@ -8,14 +8,16 @@ Two modes of operation:
    circular dependencies (e.g., the recuperator hot inlet depends on the
    turbine outlet which depends on the recuperator cold outlet).
 
-2. **Newton-Raphson with finite differences** (n_indeps > 0):
+2. **Trust-region Newton with finite differences** (n_indeps > 0):
    Used for off-design where shaft speed, map operating points, etc. are
    unknowns with associated residual equations.
+
+Both use the small built-in solvers in `NonlinearSolvers.jl`.
 """
 
 using LinearAlgebra: norm
-using NonlinearSolve
 
+include("NonlinearSolvers.jl")
 include("SolveResult.jl")
 include("ResidualAssembly.jl")
 include("DesignSolve.jl")
@@ -23,18 +25,21 @@ include("OffDesignSolve.jl")
 include("CycleMetrics.jl")
 
 """
-    solve!(net; tol=1e-6, maxiter=100, verbose=false) -> SolveResult
+    solve!(net; tol=1e-6, maxiter=100, verbose=false, alg=nothing) -> SolveResult
 
 Solve the flow network.
 
 Design-mode networks with circular dependencies (recuperators) are resolved by
-a Newton solve on the back-edge [Tt, Pt] states with AutoForwardDiff() Jacobian.
-Off-design networks with explicit unknowns use Newton with AutoFiniteDiff().
+a Newton solve on the back-edge [Tt, Pt] states (`NewtonBacktracking`,
+ForwardDiff Jacobian). Off-design networks with explicit unknowns use a dogleg
+trust region (`DoglegTrustRegion`, finite-difference Jacobian). Pass `alg` to
+override the backend for either mode.
 """
 function solve!(net::FlowNetwork;
                 tol::Float64  = 1e-6,
                 maxiter::Int  = 100,
-                verbose::Bool = false)
+                verbose::Bool = false,
+                alg::Union{Nothing,NonlinearBackend} = nothing)
 
     # Initial pass to populate element outlet states and seed back-edge guesses.
     one_pass!(net)
@@ -50,9 +55,11 @@ function solve!(net::FlowNetwork;
     n_be = length(back_edges)
 
     if n_x == 0
-        return _solve_design!(net, back_edges; tol=tol, maxiter=maxiter, verbose=verbose)
+        return _solve_design!(net, back_edges; tol=tol, maxiter=maxiter, verbose=verbose,
+                              alg = something(alg, NewtonBacktracking()))
     end
 
     _solve_offdesign!(net, x0, slices, n_x, n_res, back_edges, n_be;
-                      tol=tol, maxiter=maxiter, verbose=verbose)
+                      tol=tol, maxiter=maxiter, verbose=verbose,
+                      alg = something(alg, DoglegTrustRegion()))
 end

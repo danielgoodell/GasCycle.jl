@@ -41,6 +41,18 @@ rather than a copy of it.
 - **Composable assemblies.** Higher-level components (a turbo-alternator-
   compressor, a power conversion unit) are built from elements, not as
   monoliths (item 5).
+- **Discretized components solve their own interiors.** A 1D/2D heat
+  exchanger or a heat-pipe radiator iterates its internal nodes inside its
+  own compute step (marching or a local Newton, with implicit-function-theorem
+  derivatives) and exposes only boundary states to the cycle solve. The
+  global Newton vector stays at a few dozen unknowns, so the small built-in
+  dense solvers (`src/solver/NonlinearSolvers.jl`) remain the right tool.
+  Tightly coupled cases that genuinely need one large sparse system get a
+  sparse or NonlinearSolve.jl backend as a package extension behind the
+  `NonlinearBackend` interface — never a hard dependency.
+- **Lightweight core dependencies.** Core deps are ForwardDiff,
+  Interpolations, RecipesBase, and stdlibs. Heavy stacks (SciML,
+  DifferentialEquations, Plots, FMI) enter only as package extensions.
 
 ---
 
@@ -195,6 +207,9 @@ Size the cycle at one point while satisfying constraints at others
 - Network validation: error if `one_pass!` leaves elements unprocessed;
   convergence checks currently watch only outlet temperatures (not Pt, W,
   power).
+- Off-design unknowns are `Float64` (`_collect_indeps`), so the off-design
+  trust region uses a finite-difference Jacobian and off-design solves are
+  not yet differentiable; make indeps parametric (lands with item 1).
 - Case runner: run a table of cases (CSV in), collect named outputs
   (CSV / DataFrame out). NPSS 3.3 added native CSV I/O for the same reason.
 
@@ -209,7 +224,8 @@ The original mission of this architecture (reactor coupling). Stage it:
   and PLR, startup, load-step, and loss-of-load events become solvable
   with just shaft inertia.
 - Slow thermal transients: thermal capacitance (metal + gas) per component
-  using the volumes from item 6, wrapped with DifferentialEquations.jl.
+  using the volumes from item 6, wrapped with DifferentialEquations.jl
+  (as a package extension, so steady-state users don't load SciML).
   Reactor side couples here (point kinetics or supplied Q(t)).
 - Mixed time scales: fast electrical/shaft dynamics alongside slow thermal
   dynamics. Use stiff implicit integrators on the whole DAE first; consider

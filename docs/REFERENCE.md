@@ -192,15 +192,27 @@ radiator so the compressor inlet floats.
 ## Solver
 
 ```julia
-sol = solve!(net; tol=1e-6, maxiter=100, verbose=false)   # -> SolveResult
+sol = solve!(net; tol=1e-6, maxiter=100, verbose=false, alg=nothing)   # -> SolveResult
 ```
 
 Mode is automatic: with no element unknowns, a back-edge Newton
-(NonlinearSolve `NewtonRaphson`, ForwardDiff Jacobian) on the back-edge
+(`NewtonBacktracking`, ForwardDiff Jacobian) on the back-edge
 `[Tt, Pt]` states; with unknowns (off-design map line coordinates — compressor
 `Rline`, turbine `PR` — and shaft `N`), everything joins one normalized vector
-solved by `TrustRegion`. `tol` is on normalized residuals. Non-convergence warns
-and returns `status = :failed`.
+solved by `DoglegTrustRegion` (finite-difference Jacobian). `tol` is on the
+2-norm of the normalized residuals. Non-convergence warns and returns
+`status = :failed`.
+
+Solver backends (subtypes of `NonlinearBackend`; pass one as `alg` to override
+the mode default):
+
+| Backend | Options (defaults) |
+|---|---|
+| `NewtonBacktracking` | `jacobian=:forwarddiff` (or `:finitediff`), `max_backtracks=10` |
+| `DoglegTrustRegion` | `jacobian=:finitediff` (or `:forwarddiff`), `initial_radius=1.0`, `max_radius=1e3` (both relative to `max(‖u0‖,1)`) |
+
+Note: off-design unknowns are currently `Float64`, so `jacobian=:forwarddiff`
+applies to design-mode solves only.
 
 `SolveResult` fields: `status` (`:success`/`:failed`), `iterations`,
 `residual_norm`, `net`. `sol["Comp"]` looks an element up by name.
