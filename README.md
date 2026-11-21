@@ -174,7 +174,11 @@ Because the Newton iterates on whatever number type the model carries and builds
 | `Duct` | `dPqP` | — |
 | `Splitter` | `fracs` | fixed mass-fraction split |
 | `Mixer` | `n_inlets` | mass + energy conservation |
-| `Shaft` | `N`, `P_load` | `:design` (balance check), `:off_design` (N solved) |
+| `Shaft` | `N`, `P_load` | `:design` (balance check), `:off_design` (N solved); alternators on the shaft enter the balance |
+| `Alternator` | `V_rated`, `N_rated`, `poles`, `η` or loss model, `dPqP` | gas-path element + shaft load + electrical source |
+| `Pump` | `ΔP`, `η` | coolant pump; draws from a bus or external power |
+| `Valve` | `A`, `Cd`, `opening` | orifice throttle; `opening` as a control |
+| electrical nodes | `Cable`, `Rectifier`, `DCDCConverter`, `Transformer`, `PowerConverter`, `ElectricalBus`, `ElectricalLoad`, `ParasiticLoad` | wired with `connect_electrical!` |
 
 `η_type=:isentropic` or `:polytropic` selects the efficiency semantics on `Compressor`/`Turbine` (NPSS `effDes` is isentropic).
 
@@ -197,4 +201,4 @@ Tests cover thermodynamics and transport (with literature oracles), individual e
 
 ## Status
 
-Design-point and map-based off-design analysis are complete and validated against NPSS to print precision. The direct noble-gas property backend (thermo + transport) replaces FPT tables for He-Xe work. Off-design heat-exchanger effectiveness follows from flow-scaled UA sized at the design point. Next on the roadmap (`ROADMAP.md`): inventory (charge-pressure) control with per-component volume bookkeeping, and transients — shaft dynamics first, then thermal capacitance.
+Design-point and map-based off-design analysis are complete and validated against NPSS to print precision. The direct noble-gas property backend (thermo + transport) replaces FPT tables for He-Xe work. Around the cycle: NPSS-style targets and free variables, exact energy/exergy accounting, the electrical chain from alternator to DC bus with PLR speed control, heat links and environment nodes, assemblies, and inventory control — all differentiable. Next on the roadmap (`ROADMAP.md`): system mass and sizing (kg/kWe), multi-point design, then transients.

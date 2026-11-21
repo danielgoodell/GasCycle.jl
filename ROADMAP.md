@@ -1,11 +1,12 @@
 # GasCycle.jl Roadmap
 
-Status as of 2026-11-19. Completed work (off-design solver, NPSS
+Status as of 2026-11-20. Completed work (off-design solver, NPSS
 cross-validation campaign, NobleGasMixture backend, cold-end elements,
 off-design HX effectiveness from flow-scaled UA, PolynomialLiquid coolants,
 NPSS-syntax R-line map reader with digitized BRU argon maps, gradient/Hessian
 optimization example) is documented in the README, `validation/RESULTS.md`,
-and git history — this file tracks only what's still open.
+and git history. Phase A items 1–6 below are done (each keeps a short record
+and its follow-ups); the rest is open.
 
 ## Where the project stands
 
@@ -15,13 +16,15 @@ through a cooler or radiator, with gas and liquid property backends that are
 all AD-exact. `examples/optimize_cycle.jl` demonstrates exact gradients and
 Hessians through the full solve.
 
-What is missing is everything *around* the thermodynamic cycle: the shaft
-ends in a scalar `P_load` (no electrical system, so no DC output figure), and
-losses are scattered across elements with no system-level accounting. User
-targets and free variables (item 1) are in place, so outputs such as a DC
-power figure become solvable requirements as soon as they exist. Real
-space power work is specified at the DC bus ("deliver N kWe"), sized by
-specific mass, and controlled by inventory and parasitic load.
+Around the cycle, the system-level layer is now in place (2026-11-20):
+user targets/free variables, exact energy and exergy accounting, the
+electrical chain from a gas-cooled alternator to the DC bus with PLR speed
+control, heat links with environment nodes (the hook for a spacecraft thermal
+model), coolant pumps, assemblies, and inventory control — all differentiable.
+The solver is built in (no SciML dependency). What remains for steady-state
+system work is sizing: real space power is specified at the DC bus ("deliver
+N kWe") and judged by specific mass, which needs item 7; then multi-point
+design (8) and solver robustness (9) before transients (Phase B).
 
 Priority driver: mission needs (SR-1 Freedom) — DC power delivery, inventory
 control, and slow transients.
@@ -387,11 +390,11 @@ Cp, so monatomic kinetic theory does not apply. Implement a
 
 ## Suggested sequencing
 
-1 (targets) → 2 (loss accounting) → 3 + 4 (electrical chain with heat
-coupling) → 5 (assemblies) → 6 (inventory/controls) → 7 (mass) → 8, 9 →
-Phase B. Items 1 and 2 are small, cross-cutting, and change how every later
-item is written, so they go first. Item 9's network-validation and
-continuation pieces can be picked up opportunistically at any point.
+Done: 1 → 2 → 3 + 4 → 5 → 6. Next: 7 (mass) → 8, 9 → Phase B. Open
+follow-ups recorded under items 1–6 (schedules/limiters, paralleled
+alternators on one bus, solvable thermal nodes, component temperature
+limits) can be picked up when a study needs them; item 9's
+network-validation and continuation pieces at any point.
 
 ## Backlog (lower priority)
 

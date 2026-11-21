@@ -154,11 +154,16 @@ share the same fluid backend.
 ```julia
 Shaft(name; N=10000.0, mode=:design, P_load=0.0)
 ```
-- `:design` — no residual; `power_balance(shaft)` reports net power.
+- `:design` — no residual; `power_balance(shaft)` reports the surplus.
 - `:off_design` — `N` [rpm] is a solver unknown; residual is the power balance
-  `ΣW_turb − ΣW_comp − P_load = 0` (`P_load` = generator extraction [W]).
+  `Σ shaft_power(turbines) − Σ shaft_power(compressors, alternators) − P_load = 0`.
+`P_load` is a fixed generator extraction [W] for models without an
+`Alternator`; with one on the shaft (`drives = [comp, alt]`), its drawn power
+`P_mech` enters the balance instead. In design mode, balance a shaft that
+drives an alternator with a target, e.g. `add_free!(net, :W)` +
+`add_target!(net, n -> power_balance(shaft), 0.0; scale = 1e3)`.
 Added to the network with `add_shaft!`, which broadcasts `N` to the linked
-turbomachines for their corrected-speed lookups.
+machines for their corrected-speed and frequency calculations.
 
 ### Alternator
 
@@ -255,6 +260,18 @@ Orifice throttle: ΔPt = W²/(2ρ(Cd·A·opening)²) at constant total enthalpy
 (incompressible orifice — valid while ΔPt ≪ Pt; NaN if the demand exceeds the
 inlet pressure). `opening` is `Real` — a free variable for bypass or throttle
 control. `valve_dP(valve, state)` gives the drop.
+
+### Writing new elements
+
+Exported for element authors: `AbstractElement`, `compute!(el, inlet)`,
+`compute_hx!(hx)`, the solver interface `n_residuals`, `residuals`,
+`indep_vars`, `set_indep_vars!` (fields that hold indeps must be `Real`), and
+`link!` (shaft wiring). Electrical nodes subtype `AbstractElectrical` and
+implement `e_kind_in`, `e_kind_out`, `_e_forward!`, `_e_backward!` (see
+`src/elements/Electrical.jl`); accounting hooks are `element_inlets`,
+`element_outlets`, `element_role`, `element_losses` (`src/output/Accounting.jl`).
+`HeatLink` is the stored link type behind `add_conductance!` & co. Map
+Reynolds hooks: `re_coord(model, state)` and `reynolds_index(state)`.
 
 ### Element queries
 
@@ -457,6 +474,7 @@ stations(sol; branches=true)    # Vector of "Element.port" => FluidState, flow o
 tsdiagram(sol)                  # Plots.jl recipe: T-s diagram with stations
 mapplot(m); mapplot(comp)       # map speed lines; with operating point if element
 losswaterfall(L)                # Plots.jl recipe: exergy waterfall of a LossLedger (or sol)
+# each recipe also has a mutating form: tsdiagram!, mapplot!, losswaterfall!
 ```
 
 `stations` walks the main loop in physical order (through HX hot sides via
