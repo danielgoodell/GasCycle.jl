@@ -29,6 +29,7 @@ include("elements/Shaft.jl")
 include("elements/Electrical.jl")
 include("elements/Alternator.jl")
 include("elements/Pump.jl")
+include("elements/Valve.jl")
 include("elements/HeatSource.jl")
 include("elements/Radiator.jl")
 include("elements/HeatExchanger.jl")
@@ -37,9 +38,11 @@ include("elements/Mixer.jl")
 
 # ── Network & Solver ──────────────────────────────────────────────────────────
 include("network/FlowNetwork.jl")
+include("network/Topology.jl")
 include("network/Targets.jl")
 include("network/ElectricalNetwork.jl")
 include("network/ThermalNetwork.jl")
+include("network/Inventory.jl")
 include("network/Assembly.jl")
 include("solver/Solver.jl")
 
@@ -87,6 +90,8 @@ export electrical_report, electrical_frequency, shaft_power
 export ThermalBoundary, HeatLink, Pump, pump_power
 export add_conductance!, add_radiation!, add_loss_heat!, set_environment!
 export environment_nodes, environment_heat, heat_link_report
+export Valve, valve_dP, add_volume!, volume_mass, loop_mass, total_mass
+export set_inventory!, inventory_report
 export Assembly, expose!, assemblies, members, losses_by_assembly
 export Loss, LossLedger, energy_balance, loss_ledger, losses_by_kind, ledger_rows
 export stations   # summary(sol) extends Base.summary — no export needed

@@ -91,7 +91,7 @@ function _solve_general!(net::FlowNetwork, x0::AbstractVector, slices, back_edge
                     "  (want $(round(Float64(_primal(t.value)), sigdigits=8)))")
         end
     end
-    converged || @warn "GasCycle Newton did not converge after $maxiter iterations (|F|=$(_primal(rn)))"
+    converged || @warn "GasCycle Newton did not converge ($iters of max $maxiter iterations, |F|=$(_primal(rn)))"
 
     SolveResult(net, converged ? :success : :failed, iters, rn)
 end

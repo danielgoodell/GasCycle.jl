@@ -298,6 +298,30 @@ in the model (radiator sink, coolant inlet, or compressor inlet); pass
 `T0 = …` to change it. Ledger values are differentiable, so a loss can be a
 target or an optimization objective. `losswaterfall(L)` plots it.
 
+## Inventory: running a closed loop on its charge
+
+A real closed Brayton unit is controlled by how much gas is in it, not by a
+specified flow. Give the components gas volumes and specify the charge:
+
+```julia
+add_volume!(net, comp; V = 0.002)
+add_volume!(net, recup; V = 0.015, side = :cold)
+add_volume!(net, recup; V = 0.015, side = :hot)
+add_volume!(net, heater; V = 0.008)
+add_volume!(net, turb; V = 0.003)
+add_volume!(net, cooler; V = 0.006, side = :hot)
+
+M_des = loop_mass(design_net, comp)          # charge at the design point
+set_inventory!(net, comp; mass = 0.8 * M_des) # off-design net on maps: solve for the flow
+```
+
+Off-design at fixed speed and TIT, the machines keep their corrected operating
+point, so flow, pressures and power follow the charge; heat exchangers sized
+for full flow shift the temperatures a little. `examples/inventory_control.jl`
+sweeps the charge from 100 % to 50 %. Combine with `add_speed_control!` (PLR)
+or a turbine-bypass `Valve` whose `opening` is a free variable for the other
+classic control paths.
+
 ## Bleed flows
 
 Branches use explicit port wiring with `Splitter`/`Mixer`:

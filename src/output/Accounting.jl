@@ -174,45 +174,8 @@ end
 
 # ── System boundary: open streams ────────────────────────────────────────────
 
-# Concrete outlet port names (HX `:outlet` is an alias of `:cold_outlet`).
-_outlet_names(el::AbstractElement) = network_outlets(el)
-_outlet_names(::HeatExchanger)     = [:cold_outlet, :hot_outlet]
-_canon_outlet(el::AbstractElement, p::Symbol) = p
-_canon_outlet(::HeatExchanger, p::Symbol)     = p == :outlet ? :cold_outlet : p
-_canon_inlet(el::AbstractElement, p::Symbol)  = p
-_canon_inlet(::HeatExchanger, p::Symbol)      = p == :inlet ? :cold_inlet : p
-
-function _inlet_port(el::AbstractElement, port::Symbol)
-    el isa HeatExchanger && return port === :hot_inlet ? el.hot_inlet : el.cold_inlet
-    if el isa Mixer
-        i = port === :inlet ? 1 : port === :bleed_inlet ? 2 :
-            parse(Int, string(port)[7:end])
-        return el.inlets[i]
-    end
-    el.inlet
-end
-
-# Ports joined inside an element (same stream): (inlet, outlet) pairs.
-_internal_links(el::AbstractElement) = [(:inlet, :outlet)]
-_internal_links(::HeatExchanger) = [(:hot_inlet, :hot_outlet), (:cold_inlet, :cold_outlet)]
-_internal_links(el::Splitter) = [(:inlet, p) for p in network_outlets(el)]
-_internal_links(el::Mixer) = [(p, :outlet) for p in network_required_inlets(el)]
-
-# Connected components of the port graph: Dict (element index, port) → root.
-function _stream_components(net::FlowNetwork)
-    parent = Dict{Tuple{Int,Symbol},Tuple{Int,Symbol}}()
-    find(x) = (haskey(parent, x) || (parent[x] = x);
-               parent[x] == x ? x : (parent[x] = find(parent[x])))
-    unite(a, b) = (ra = find(a); rb = find(b); ra == rb || (parent[ra] = rb))
-    for (i, el) in enumerate(net.elements), (a, b) in _internal_links(el)
-        unite((i, a), (i, b))
-    end
-    for e in net.edges
-        unite((e.src, _canon_outlet(net.elements[e.src], e.src_port)),
-              (e.dst, _canon_inlet(net.elements[e.dst], e.dst_port)))
-    end
-    Dict(k => find(k) for k in collect(keys(parent)))
-end
+# Port-graph helpers (_canon_inlet, _inlet_port, _stream_components, …) live in
+# network/Topology.jl.
 
 """
 Open streams of a solved network: `entrances` (boundary streams, and the seed

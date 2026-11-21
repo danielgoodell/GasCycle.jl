@@ -9,7 +9,7 @@ GasCycle.jl — a Julia package for closed Brayton cycle analysis (He-Xe working
 ## Commands
 
 ```bash
-# Full test suite (~780 tests)
+# Full test suite (~810 tests)
 julia --project -e 'using Pkg; Pkg.test()'
 
 # Single test file (each is standalone: does `using Test; using GasCycle` itself)
@@ -34,6 +34,8 @@ Include-order layering in `src/GasCycle.jl` (single module, no submodules): unit
 - **`network/FlowNetwork.jl`** — directed port graph; computes a flow plan; loops (recuperator, cold-end closure) are declared as back-edges.
 - **Electrical** — `elements/Electrical.jl` (cables, converters, buses, loads; `AbstractElectrical`, `ElecPoint`), `elements/Alternator.jl` (gas-path element + electrical source + shaft consumer), `network/ElectricalNetwork.jl` (`connect_electrical!`, `_solve_electrical!` called at the start of `one_pass!`, `add_speed_control!`). Radial tree; power-flow level (no reactive power). Shafts sum `shaft_power(el)` over producers/consumers.
 - **Thermal** — `elements/Thermal.jl` (`ThermalBoundary`, `HeatLink`), `elements/Pump.jl`, `network/ThermalNetwork.jl` (`add_conductance!`/`add_radiation!`/`add_loss_heat!`, `_apply_heat_links!` in `one_pass!` after the electrical solve, `_init_couplings!` in `solve!`). Stream endpoints are `Duct` heat ports (mean temperature). Link `Q` and pump `P_elec` are Newton unknowns.
+- **`network/Topology.jl`** — port-graph helpers (`_canon_inlet`, `_stream_components`, `_seeded_state`, `_propagate_flows`). In `one_pass!`, a back-edge closing onto a seeded inlet takes the seed's W; with free variables, other back-edges take seed-propagated flows (keeps residuals pure when a seed W is an unknown).
+- **`network/Inventory.jl`** — `add_volume!` (Gauss–Legendre ρ along linear T/P), `loop_mass`, `set_inventory!`.
 - **`network/Assembly.jl`** — `Assembly` wraps a `FlowNetwork`; building calls forward to it; `add!(net, asm)` flattens with name prefixes and index offsets; `_resolve`/`_resolve_e` map exposed ports through nesting. `connect!`, `add_hx_pair!`, `connect_electrical!` resolve assemblies inside the original functions (keyword args can't dispatch).
 - **`output/Accounting.jl`** — `energy_balance` (first law) and `loss_ledger` (exergy; closure residual is an exact identity, so treat a nonzero one as a model bug). New element types plug in via `element_inlets`/`element_outlets`/`element_role`/`element_losses`.
 - **`network/Targets.jl`** — user solver pairs: `add_free!` (element field, seed-state field, or get/set closures) and `add_target!` (any `net -> Real`).

@@ -19,6 +19,7 @@ Designed as a clean, extensible reimplementation of the core NPSS cycle-analysis
 - **Built-in Newton solvers** (no heavy solver dependency) — back-edge states (recuperator, cold-end loop closure) and off-design unknowns (map coordinates, shaft speed) solved together; Newton with backtracking for design, dogleg trust region for off-design, pluggable via `solve!(net; alg=...)`
 - **Electrical power chain** — gas-cooled `Alternator` on the shaft, then cables, transformers, rectifiers, DC-DC converters, buses, user loads and a parasitic load radiator wired as their own network (`connect_electrical!`); PLR speed control in off-design (`add_speed_control!`); output specified at the DC bus
 - **Heat links and environment nodes** — conduction between streams sharing a wall, leaks and radiation to any number of named environment nodes (`set_environment!`/`environment_heat` for coupling to a spacecraft thermal model), electronics losses into a pumped coolant loop (`Pump`)
+- **Inventory control** — component gas volumes (`add_volume!`, accurate through strong temperature gradients), loop mass, and inventory mode (`set_inventory!`): specify the charge, solve for the flow; `Valve` for bypass/throttle control (`examples/inventory_control.jl`)
 - **Assemblies** — named, nestable building blocks (a TAC, a PCU) with exposed ports, merged into the network with prefixed names; losses per unit (`examples/assemblies.jl`)
 - **Energy and loss accounting** — `energy_balance(sol)` (first law) and `loss_ledger(sol)` (exergy destroyed per component, rejected heat, exact closure check), printed and plotted (`losswaterfall`) as a waterfall from reactor exergy to net power
 - **Targets and free variables** — NPSS-style solver pairs (`add_free!`, `add_target!`): e.g. size the mass flow for a net power, or hold shaft speed with reactor outlet temperature; works in design and off-design and stays differentiable
@@ -180,7 +181,7 @@ Because the Newton iterates on whatever number type the model carries and builds
 ## Running tests and benchmarks
 
 ```
-julia --project -e 'using Pkg; Pkg.test()'    # ~780 tests
+julia --project -e 'using Pkg; Pkg.test()'    # ~810 tests
 julia benchmarks/runbenchmarks.jl             # BenchmarkTools suite
 ```
 

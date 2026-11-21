@@ -245,6 +245,17 @@ Q − model = 0, so links can join any parts of the loop, stay differentiable
 and can be targets. Electrical losses not routed with `add_loss_heat!` go to
 the surroundings.
 
+### Valve
+
+```julia
+Valve(name; A, Cd=0.8, opening=1.0)
+```
+
+Orifice throttle: ΔPt = W²/(2ρ(Cd·A·opening)²) at constant total enthalpy
+(incompressible orifice — valid while ΔPt ≪ Pt; NaN if the demand exceeds the
+inlet pressure). `opening` is `Real` — a free variable for bypass or throttle
+control. `valve_dP(valve, state)` gives the drop.
+
 ### Element queries
 
 | Function | Meaning |
@@ -273,6 +284,35 @@ one_pass!(net)                                 # single propagation (rarely need
 `back_edge=true` on `connect_port!` makes the destination state a solver
 unknown seeded each iteration — used to close the loop through a cooler or
 radiator so the compressor inlet floats.
+
+## Volumes and inventory
+
+```julia
+add_volume!(net, el; V, side=:main, n=5)      # gas volume [m³]; HX: side=:hot / :cold
+volume_mass(net.volumes[k])                    # [kg]
+loop_mass(net, el; side=:main)                 # mass in the loop through el [kg]
+total_mass(net)
+set_inventory!(net, el; mass, vary=:W)         # inventory mode for that loop
+inventory_report(sol)                          # per-volume V, ρ̄, m and loop totals
+```
+
+A volume's mass is V·⟨ρ⟩ with ρ integrated along linear inlet→outlet
+temperature and pressure profiles by `n`-point Gauss–Legendre quadrature
+(1–6) — handles strong axial gradients (recuperators) for any fluid;
+5 points match the ideal-gas closed form P·V/(R·T_lm) to ~1e-7 at a 2:1
+temperature ratio. Loops are the connected streams of the port graph.
+
+`set_inventory!` makes the loop's charge the input: the loop's circulating
+flow (its seed state, or a `set_boundary!` guess for extra loops) becomes a
+free variable and the loop mass a target. Meaningful where the pressure level
+floats — off-design on maps — as on a real closed Brayton unit; `vary=:Pt`
+varies the seed pressure instead. Use it at the top level (not inside an
+assembly).
+
+In a closed loop the seed's flow is authoritative: a back-edge that closes
+onto a seeded inlet takes the seed's `W`, and when free variables exist every
+other back-edge gets the flow propagated from the current seeds (splitter
+fractions, mixer sums), so a seed flow can itself be an unknown.
 
 ## Assemblies
 

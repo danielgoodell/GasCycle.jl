@@ -227,8 +227,26 @@ ports, defaults, and its own targets.
 - Assemblies make multi-unit systems (e.g. 2 PCUs sharing a reactor and
   radiator) a one-liner, and are the natural unit for mass estimation (item 7).
 
-### 6. Inventory control, volumes, and control elements
-Real CBC power control is charge-pressure (inventory) control, plus PLR and
+### 6. Inventory control, volumes, and control elements — MOSTLY DONE 2026-11-20
+Done: `add_volume!` (HX sides separate) with Gauss–Legendre mass integration
+along linear T/P profiles (validated against the ideal-gas log-mean closed
+form; converges with points); `loop_mass`/`total_mass`/`inventory_report`;
+`set_inventory!` (loop flow free, loop mass target, via item-1 machinery);
+`Valve` (orifice, `opening` as a control); `examples/inventory_control.jl`.
+Verified: on a fixed-temperature off-design loop, 80 % charge gives exactly
+80 % flow, pressures and power, temperatures unchanged; dW/dM by AD = W/M.
+Core fix on the way: in closed loops the seed flow is now authoritative — a
+back-edge closing onto a seeded inlet takes the seed's W, and with free
+variables every other back-edge gets the flow propagated from the current
+seeds (before, back-edges carried the previous pass's flow, so a seed flow
+could not be a free variable reliably).
+Still open:
+- Schedules and limiters (setpoint schedules; min/max limiters with
+  active-set switching on speed, TIT, surge margin) — a separate solver
+  feature, deferred.
+- Compressible (choked) valve model for large pressure ratios.
+
+Original plan, for reference: real CBC power control is charge-pressure (inventory) control, plus PLR and
 turbine bypass.
 - Make loop inventory (total gas mass/moles) a model quantity: assign a
   volume to every component; where components are currently joined

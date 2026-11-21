@@ -80,11 +80,12 @@ mutable struct FlowNetwork
     e_edges::Vector{Tuple{Int,Int}}    # (src, dst) indices into `electrical`
     heat_links::Vector{HeatLink}
     assemblies::Vector{String}         # paths of merged assemblies
+    volumes::Vector{Any}               # VolumeSpec (network/Inventory.jl)
 end
 
 FlowNetwork() = FlowNetwork(AbstractElement[], PortEdge[], Shaft[], 0, nothing,
                             Tuple{Int,Symbol,FluidState}[], nothing,
-                            FreeVar[], Target[], Any[], Tuple{Int,Int}[], HeatLink[], String[])
+                            FreeVar[], Target[], Any[], Tuple{Int,Int}[], HeatLink[], String[], Any[])
 
 _invalidate_plan!(net::FlowNetwork) = (net.plan = nothing)
 
@@ -428,6 +429,10 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
     end
 
     # Pre-seed back-edge inlets
+    # Flow propagation is only needed when a seed flow can change between
+    # passes, i.e. when free variables exist; otherwise the previous pass's
+    # source flow already equals it.
+    Wflow = (isnothing(back_edge_seeds) || isempty(net.free_vars)) ? nothing : _propagate_flows(net)
     be_idx = 0
     for edge in plan.back_edges
         be_idx += 1
@@ -441,10 +446,23 @@ function one_pass!(net::FlowNetwork, back_edge_seeds=nothing)
             # stripped back to seed_state.W's numeric type to avoid carrying
             # temporary inner-Dual values left by the ForwardDiff Jacobian
             # evaluations into the next primal residual call.
+            #
+            # A back-edge that closes onto a seeded inlet (the network seed or
+            # a boundary guess) takes its mass flow from that seed: in a closed
+            # loop the seed W is the loop's flow, so changing it (e.g. as a
+            # free variable in inventory mode) reaches the whole loop.
+            #
+            # Other back-edges take the flow propagated from the current seeds
+            # (not the previous pass's source outlet), so the residual stays a
+            # pure function of the unknowns even when a seed flow is one.
             Tt_s = back_edge_seeds[2*be_idx - 1]
             Pt_s = back_edge_seeds[2*be_idx]
             base = isnothing(src_out) ? _guess_state(net, edge) : src_out[]
-            W_s = _strip_to_type(base.W, typeof(net.seed_state.W))
+            ss = _seeded_state(net, edge)
+            dkey = (edge.dst, _canon_inlet(net.elements[edge.dst], edge.dst_port))
+            W_s = !isnothing(ss) ? ss.W :
+                  !isnothing(Wflow) && haskey(Wflow, dkey) ? Wflow[dkey] :
+                  _strip_to_type(base.W, typeof(net.seed_state.W))
             _store_available!(avail, net, edge.dst, edge.dst_port,
                               Port(FluidState(Pt_s, Tt_s, W_s, base.fluid)))
         else

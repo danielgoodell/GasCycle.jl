@@ -109,7 +109,7 @@ end
 add_shaft!(a::Assembly, shaft::Shaft; kw...) =
     (_register!(a, shaft); add_shaft!(a.net, shaft; kw...); a)
 
-for f in (:set_boundary!, :add_conductance!, :add_radiation!,
+for f in (:set_boundary!, :add_conductance!, :add_radiation!, :add_volume!,
           :add_loss_heat!, :add_free!, :add_target!, :add_speed_control!)
     @eval $f(a::Assembly, args...; kw...) = ($f(a.net, args...; kw...); a)
 end
@@ -214,6 +214,7 @@ function add!(net::FlowNetwork, a::Assembly)
     for l in src.heat_links
         push!(net.heat_links, _prefix!(l, a.name))
     end
+    append!(net.volumes, src.volumes)          # volumes refer to the (shared) element objects
     for fv in src.free_vars
         push!(net.free_vars, FreeVar("$(a.name).$(fv.name)", fv.get, fv.set!, fv.ref, fv.lower, fv.upper))
     end

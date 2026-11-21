@@ -44,7 +44,7 @@ function _solve_design!(net::FlowNetwork, back_edges;
         status = converged ? "converged" : "DID NOT CONVERGE"
         println("Solver (back-edge Newton): $status in $iters iters, |F| = $(round(Float64(rn), sigdigits=3))")
     end
-    converged || @warn "GasCycle back-edge Newton did not converge after $maxiter iterations (|F|=$rn)"
+    converged || @warn "GasCycle back-edge Newton did not converge ($iters of max $maxiter iterations, |F|=$rn)"
 
     SolveResult(net, converged ? :success : :failed, iters, rn)
 end
